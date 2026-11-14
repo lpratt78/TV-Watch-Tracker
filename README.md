@@ -31,8 +31,8 @@ Both are stored in the browser's local storage on each device. Optionally, copy 
 ## Hosting on GitHub Pages
 
 1. Repo → Settings → Pages → Source: **Deploy from a branch**, branch `main`, folder `/ (root)`.
-2. The site appears at `https://<user>.github.io/watch-tracker/`.
-3. Add `https://<user>.github.io` as an authorized JavaScript origin on the Google OAuth client.
+2. The site appears at `https://lpratt78.github.io/TV-Watch-Tracker/`.
+3. Add `https://lpratt78.github.io` as an authorized JavaScript origin on the Google OAuth client.
 
 ## Installing
 
