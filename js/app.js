@@ -3,7 +3,7 @@ import * as T from './tmdb.js';
 import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '0.1.0';
+const APP_VERSION = '0.1.1';
 const view = document.getElementById('view');
 const titleEl = document.getElementById('page-title');
 
@@ -84,16 +84,14 @@ view.addEventListener('click', (e) => { if (e.target.closest('[data-retry]')) ro
 window.addEventListener('hashchange', route);
 
 // ---------- Discover ----------
-const FALLBACK_SERVICES = { 8: 'Netflix', 9: 'Prime Video', 337: 'Disney+', 1899: 'Max', 15: 'Hulu', 350: 'Apple TV+', 531: 'Paramount+', 386: 'Peacock' };
 
 async function renderDiscover() {
   titleEl.textContent = 'Discover';
   const s = store.getSettings();
   if (!s.tmdbKey) { view.innerHTML = missingKeyPanel(); return; }
 
-  let providers = [];
-  try { providers = await T.providerList(); } catch { /* offline: use fallback names */ }
-  const pmap = new Map(providers.map((p) => [p.id, p]));
+  let services = [];
+  try { services = await T.selectedServices(); } catch { /* offline with no saved list */ }
 
   const rows = [
     { title: 'Trending this week', load: () => T.trending('week') },
@@ -101,11 +99,11 @@ async function renderDiscover() {
     { title: 'Popular shows', load: () => T.popular('tv') },
     { title: 'Coming soon to theaters', load: () => T.upcomingMovies() },
     { title: 'New episodes this week', load: () => T.onTheAirTV() },
-    ...s.services.map((id) => {
-      const p = pmap.get(id);
+    ...services.map((p) => {
+      const id = p.id;
       return {
-        title: p?.name || FALLBACK_SERVICES[id] || `Service ${id}`,
-        logo: p?.logo,
+        title: p.name,
+        logo: p.logo,
         load: async () => {
           const [m, t] = await Promise.all([T.byProvider('movie', id), T.byProvider('tv', id)]);
           const out = [];
@@ -354,7 +352,10 @@ async function renderSettings() {
       <button class="btn primary" type="submit">Save</button>
     </form>
 
-    <div class="panel"><h2>Streaming services on Discover</h2><div id="services" class="checks"><span class="muted small">${s.tmdbKey ? 'Loading services…' : 'Add your TMDB key first.'}</span></div></div>
+    <div class="panel"><h2>Streaming services on Discover</h2>
+      <p class="muted small">Checked services get their own row on Discover. Popular services are listed first, then everything else TMDB has for your region.</p>
+      <input type="search" id="svc-filter" placeholder="Filter services" style="margin-bottom:10px" ${s.tmdbKey ? '' : 'hidden'}>
+      <div id="services" class="checks"><span class="muted small">${s.tmdbKey ? 'Loading services…' : 'Add your TMDB key first.'}</span></div></div>
 
     <form class="panel" id="google-form" autocomplete="off">
       <h2>Google Drive sync</h2>
@@ -412,17 +413,26 @@ async function renderSettings() {
   if (s.tmdbKey) {
     try {
       const list = await T.providerList();
-      const selected = new Set(s.services);
+      const known = T.matchKnown(list);
+      const knownIds = new Set(known.filter((k) => k.provider).map((k) => k.provider.id));
+      const ordered = [...known.filter((k) => k.provider).map((k) => k.provider), ...list.filter((p) => !knownIds.has(p.id))];
+      let current = (await T.selectedServices()).map((p) => p.id);
+      const selected = new Set(current);
       const box = $('#services');
       if (!box) return;
-      box.innerHTML = list.slice(0, 60).map((p) => `<label><input type="checkbox" value="${p.id}" ${selected.has(p.id) ? 'checked' : ''}>
-        <img src="${esc(T.img(p.logo, 'w92'))}" alt="">${esc(p.name)}</label>`).join('');
+      const missing = known.filter((k) => k.row && !k.provider).map((k) => k.names[0]);
+      box.innerHTML = ordered.map((p) => `<label data-name="${esc(p.name.toLowerCase())}"><input type="checkbox" value="${p.id}" ${selected.has(p.id) ? 'checked' : ''}>
+        <img loading="lazy" src="${esc(T.img(p.logo, 'w92'))}" alt="">${esc(p.name)}</label>`).join('')
+        + (missing.length ? `<p class="muted small" style="grid-column:1/-1">Not listed by TMDB for ${esc(s.region)} right now: ${esc(missing.join(', '))}.</p>` : '');
       box.addEventListener('change', () => {
         const ids = $$('input:checked', box).map((i) => Number(i.value));
-        // Keep the user's existing order, append new picks.
-        const order = [...s.services.filter((id) => ids.includes(id)), ...ids.filter((id) => !s.services.includes(id))];
-        store.saveSettings({ services: order });
-        s.services = order;
+        // Keep the existing order, append new picks.
+        current = [...current.filter((id) => ids.includes(id)), ...ids.filter((id) => !current.includes(id))];
+        store.saveSettings({ services: current });
+      });
+      $('#svc-filter').addEventListener('input', (e) => {
+        const q = e.target.value.trim().toLowerCase();
+        $$('label', box).forEach((l) => { l.hidden = !!q && !l.dataset.name.includes(q); });
       });
     } catch (e) {
       const box = $('#services'); if (box) box.innerHTML = `<span class="muted small">${esc(e.message)}</span>`;

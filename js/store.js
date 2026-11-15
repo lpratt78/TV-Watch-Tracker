@@ -10,7 +10,7 @@ const DEFAULT_SETTINGS = {
   googleClientId: '',   // OAuth web client ID from Google Cloud.
   region: 'US',         // Watch-provider region (ISO 3166-1).
   language: 'en-US',
-  services: [8, 9, 337, 1899, 15, 350, 531, 386], // Netflix, Prime, Disney+, Max, Hulu, Apple TV+, Paramount+, Peacock
+  services: null,       // null = default rows (KNOWN_SERVICES in tmdb.js); otherwise TMDB provider IDs.
   autoSync: false,      // Set true once the user signs in with Google.
 };
 

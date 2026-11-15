@@ -89,14 +89,95 @@ export const details = (type, id) => tmdb(`/${type}/${id}`, {
 export const tvLite = (id, opts) => tmdb(`/tv/${id}`, {}, opts);
 export const movieLite = (id, opts) => tmdb(`/movie/${id}`, {}, opts);
 
+// Streaming services, matched by name because TMDB provider IDs can change.
+// Each entry lists the names TMDB has used for that service. `row: true` means it
+// gets a Discover row by default; the rest are listed first in Settings.
+export const KNOWN_SERVICES = [
+  { names: ['Netflix'], row: true },
+  { names: ['Amazon Prime Video', 'Prime Video'], row: true },
+  { names: ['Disney Plus', 'Disney+'], row: true },
+  { names: ['Max', 'HBO Max'], row: true },
+  { names: ['Hulu'], row: true },
+  { names: ['Apple TV Plus', 'Apple TV+'], row: true },
+  { names: ['Paramount Plus', 'Paramount+'], row: true },
+  { names: ['Peacock Premium', 'Peacock'], row: true },
+  { names: ['Tubi TV', 'Tubi'], row: true },
+  { names: ['Pluto TV'], row: true },
+  { names: ['YouTube TV'], row: true },
+  { names: ['Angel Studios', 'Angel'], row: true },
+  { names: ['Gaia'], row: true },
+  { names: ['MGM Plus', 'MGM+', 'Epix'], row: true },
+  { names: ['Starz'] },
+  { names: ['AMC Plus', 'AMC+'] },
+  { names: ['The Roku Channel', 'Roku Channel'] },
+  { names: ['Crunchyroll'] },
+  { names: ['Discovery Plus', 'Discovery+'] },
+  { names: ['BritBox'] },
+  { names: ['Acorn TV'] },
+  { names: ['Shudder'] },
+  { names: ['BET Plus', 'BET+'] },
+  { names: ['Hallmark Movies Now', 'Hallmark+'] },
+  { names: ['Criterion Channel', 'The Criterion Channel'] },
+  { names: ['MUBI'] },
+  { names: ['Plex'] },
+  { names: ['Kanopy'] },
+  { names: ['Hoopla'] },
+  { names: ['Freevee', 'Amazon Freevee'] },
+  { names: ['Fubo', 'fuboTV'] },
+  { names: ['Sling TV'] },
+  { names: ['Philo'] },
+  { names: ['ESPN Plus', 'ESPN+'] },
+  { names: ['Crackle'] },
+  { names: ['PBS'] },
+  { names: ['Sundance Now'] },
+  { names: ['Hi-YAH', 'Hi-YAH!'] },
+  { names: ['Dove Channel'] },
+  { names: ['Great American Pure Flix', 'Pure Flix'] },
+  { names: ['Hidive'] },
+  { names: ['Shout! Factory TV'] },
+  { names: ['Fandor'] },
+  { names: ['Xumo Play', 'Xumo'] },
+  { names: ['Fandango at Home Free', 'Vudu Free'] },
+];
+
+const normName = (n) => String(n).toLowerCase().replace(/\+/g, ' plus').replace(/[^a-z0-9]/g, '');
+
+// For each known service, the matching provider from TMDB's list (or null).
+export function matchKnown(list) {
+  const byName = new Map(list.map((p) => [normName(p.name), p]));
+  return KNOWN_SERVICES.map((k) => ({ ...k, provider: k.names.map((n) => byName.get(normName(n))).find(Boolean) || null }));
+}
+
+// The providers that get a Discover row, in display order.
+export async function selectedServices() {
+  const { services } = getSettings();
+  const list = await providerList();
+  if (Array.isArray(services)) {
+    const byId = new Map(list.map((p) => [p.id, p]));
+    return services.map((id) => byId.get(id)).filter(Boolean);
+  }
+  return matchKnown(list).filter((k) => k.row && k.provider).map((k) => k.provider);
+}
+
 let providerListCache = null;
+const PROVIDERS_KEY = (region) => `wt.providers.${region}`;
 export async function providerList() {
   if (providerListCache) return providerListCache;
   const { region } = getSettings();
-  const [m, t] = await Promise.all([
-    tmdb('/watch/providers/movie', { watch_region: region }),
-    tmdb('/watch/providers/tv', { watch_region: region }),
-  ]);
+  let m, t;
+  try {
+    [m, t] = await Promise.all([
+      tmdb('/watch/providers/movie', { watch_region: region }),
+      tmdb('/watch/providers/tv', { watch_region: region }),
+    ]);
+  } catch (e) {
+    // Offline: fall back to the last list we saw.
+    try {
+      const saved = JSON.parse(localStorage.getItem(PROVIDERS_KEY(region)));
+      if (saved?.length) return (providerListCache = saved);
+    } catch { /* ignore */ }
+    throw e;
+  }
   const map = new Map();
   for (const p of [...(m.results || []), ...(t.results || [])]) {
     const prio = p.display_priorities?.[region] ?? p.display_priority ?? 999;
@@ -104,6 +185,7 @@ export async function providerList() {
     if (!prev || prio < prev.priority) map.set(p.provider_id, { id: p.provider_id, name: p.provider_name, logo: p.logo_path, priority: prio });
   }
   providerListCache = [...map.values()].sort((a, b) => a.priority - b.priority);
+  try { localStorage.setItem(PROVIDERS_KEY(region), JSON.stringify(providerListCache)); } catch { /* ignore */ }
   return providerListCache;
 }
 export function clearProviderCache() { providerListCache = null; }
