@@ -1,5 +1,5 @@
 // Service worker: offline app shell, cached TMDB images, network-first TMDB API.
-const VERSION = 'wt-v0.1.3';
+const VERSION = 'wt-v0.1.4';
 const SHELL = `${VERSION}-shell`;
 const IMAGES = 'wt-images';
 const API = 'wt-api';
@@ -68,7 +68,8 @@ self.addEventListener('fetch', (e) => {
       e.respondWith((async () => {
         const c = await caches.open(SHELL);
         try {
-          const res = await fetch(req);
+          // Skip the browser's HTTP cache so key changes show up right away.
+          const res = await fetch(req, { cache: 'no-cache' });
           if (res.ok) c.put(req, res.clone());
           return res;
         } catch {
