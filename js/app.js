@@ -4,8 +4,9 @@ import * as store from './store.js';
 import * as T from './tmdb.js';
 import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
+import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.2.1';
+const APP_VERSION = '0.3.0';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -241,7 +242,7 @@ function renderHome() {
 }
 
 // ---------- Library ----------
-const libState = (() => { const d = { shelf: 'all', type: 'all', sort: 'recent', view: 'list' }; try { return { ...d, ...JSON.parse(localStorage.getItem('wt.libView') || '{}') }; } catch { return d; } })();
+const libState = (() => { const d = { shelf: 'all', type: 'all', sort: 'recent', view: 'list', list: '' }; try { return { ...d, ...JSON.parse(localStorage.getItem('wt.libView') || '{}') }; } catch { return d; } })();
 const saveLib = () => { try { localStorage.setItem('wt.libView', JSON.stringify(libState)); } catch { /* ignore */ } };
 Object.assign(actions, {
   shelf: (el) => { libState.shelf = el.dataset.v; saveLib(); redraw(); },
@@ -263,7 +264,9 @@ function libCell(it) {
 
 function renderLibrary() {
   const top = '<h2>Library</h2><a class="plus-btn" href="#/discover" aria-label="Add a movie or show">+</a>';
-  const all = store.listItems().filter((i) => libState.type === 'all' || i.type === libState.type);
+  const listNames = [...new Set(store.listItems().flatMap((i) => i.lists || []))].sort();
+  if (libState.list && !listNames.includes(libState.list)) libState.list = '';
+  const all = store.listItems().filter((i) => (libState.type === 'all' || i.type === libState.type) && (!libState.list || (i.lists || []).includes(libState.list)));
   const counts = { all: all.length };
   for (const k of Object.keys(STATUS)) counts[k] = all.filter((i) => i.status === k).length;
   const sorters = {
@@ -279,6 +282,7 @@ function renderLibrary() {
     <div class="toolbar">
       <div class="seg" role="group" aria-label="Type">${[['all', 'All'], ['movie', 'Movies'], ['tv', 'Shows']].map(([k, l]) => `<button data-a="lib-type" data-v="${k}" aria-pressed="${libState.type === k}">${l}</button>`).join('')}</div>
       <span class="grow"></span>
+      ${listNames.length ? `<select id="lib-list" aria-label="List"><option value="">All lists</option>${listNames.map((n) => `<option ${libState.list === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : ''}
       <select id="lib-sort" aria-label="Sort">${[['recent', 'Recent'], ['title', 'Title'], ['rating', 'Rating'], ['year', 'Year']].map(([k, l]) => `<option value="${k}" ${libState.sort === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <div class="seg" role="group" aria-label="View"><button data-a="lib-view" data-v="list" aria-pressed="${libState.view === 'list'}" aria-label="List">☰</button><button data-a="lib-view" data-v="grid" aria-pressed="${libState.view === 'grid'}" aria-label="Grid">▦</button></div>
     </div>`;
@@ -295,7 +299,7 @@ function renderLibrary() {
   } else {
     body += list.map(libRow).join('');
   }
-  return { top, body, after: () => { $('#lib-sort')?.addEventListener('change', (e) => { libState.sort = e.target.value; saveLib(); redraw(); }); } };
+  return { top, body, after: () => { $('#lib-sort')?.addEventListener('change', (e) => { libState.sort = e.target.value; saveLib(); redraw(); }); $('#lib-list')?.addEventListener('change', (e) => { libState.list = e.target.value; saveLib(); redraw(); }); } };
 }
 
 // ---------- Discover ----------
@@ -486,6 +490,60 @@ function renderAlerts() {
 
 // ---------- Me ----------
 let editingName = false;
+let traktPreview = null; // { items, summary }
+let importing = null;    // { done, total }
+async function fillDetails(items) {
+  const todo = items.filter((i) => !i.poster);
+  importing = { done: 0, total: todo.length }; redraw();
+  const patches = [];
+  let i = 0;
+  const worker = async () => {
+    while (i < todo.length) {
+      const it = todo[i++];
+      try {
+        const d = await T.tmdb(`/${it.type}/${it.id}`);
+        const n = T.norm(d, it.type);
+        patches.push([`${it.type}:${it.id}`, { poster: n.poster, title: n.title, year: n.year }]);
+      } catch { /* leave it; the colored title card shows instead */ }
+      importing.done++;
+      if (importing.done % 10 === 0) { const line = $id('import-line'); if (line) line.textContent = `Getting posters… ${importing.done} of ${importing.total}`; }
+    }
+  };
+  await Promise.all(Array.from({ length: 4 }, worker));
+  store.patchQuietly(patches);
+  importing = null;
+}
+Object.assign(actions, {
+  'trakt-pick': () => {
+    const inp = Object.assign(document.createElement('input'), { type: 'file', accept: '.zip,application/zip,application/json,.json', multiple: true });
+    inp.onchange = async () => {
+      const fs = [...(inp.files || [])]; if (!fs.length) return;
+      try {
+        let files = {};
+        for (const f of fs) {
+          if (/\.zip$/i.test(f.name) || f.type.includes('zip')) Object.assign(files, await readZip(await f.arrayBuffer()));
+          else files[f.name] = await f.text();
+        }
+        const items = parseTrakt(files);
+        if (!items.length) throw new Error('No movies or shows found in that file.');
+        traktPreview = { items, summary: summarize(items), lists: [...new Set(items.flatMap((i) => i.lists))] };
+        redraw();
+      } catch (e) { toast(e.message, 5000); }
+    };
+    inp.click();
+  },
+  'trakt-cancel': () => { traktPreview = null; redraw(); },
+  'trakt-go': async () => {
+    if (!traktPreview) return;
+    const { items } = traktPreview;
+    traktPreview = null;
+    const r = store.bulkImport(items);
+    toast(`Imported ${r.added} new title${r.added === 1 ? '' : 's'}${r.updated ? `, updated ${r.updated}` : ''}.`, 4000);
+    await fillDetails(store.listItems().filter((i) => items.some((x) => x.type === i.type && x.id === i.id)));
+    try { await checkUpdates({ force: true }); } catch { /* shown in Alerts */ }
+    redraw();
+  },
+});
 Object.assign(actions, {
   'edit-name': () => { editingName = true; redraw().then(() => $('#name')?.focus()); },
   'save-name': () => { store.saveSettings({ name: ($('#name')?.value || '').trim() }); editingName = false; redraw(); },
@@ -572,6 +630,15 @@ async function renderMe() {
         ? '<div class="btn-pair"><button class="primary" style="margin:0" data-a="sync-now">Sync now</button><button class="ghost-btn" data-a="sign-out">Sign out</button></div>'
         : `<button class="primary" data-a="sign-in" ${s.googleClientId ? '' : 'disabled'}>Sign in with Google</button>`}
       <p class="muted-note" id="sync-line" style="margin-bottom:0">${esc(syncLine(st))}</p></div>
+
+    <div class="card"><h3>Import from Trakt</h3>
+      ${importing ? `<p class="author" id="import-line" style="margin:0">Getting posters… ${importing.done} of ${importing.total}</p>`
+        : traktPreview ? `<p style="margin:4px 0 6px">Found <b>${traktPreview.summary.total}</b> titles: ${traktPreview.summary.shows} shows and ${traktPreview.summary.movies} movies.</p>
+          <dl class="kv" style="margin-bottom:8px"><dt>Watched</dt><dd>${traktPreview.summary.watched}</dd><dt>Watching</dt><dd>${traktPreview.summary.watching} (shows you haven't caught up on)</dd><dt>Watchlist</dt><dd>${traktPreview.summary.watchlist} (on your lists, not watched yet)</dd>${traktPreview.summary.rated ? `<dt>Rated</dt><dd>${traktPreview.summary.rated}</dd>` : ''}${traktPreview.lists.length ? `<dt>Lists</dt><dd>${esc(traktPreview.lists.join(', '))}</dd>` : ''}</dl>
+          <p class="author" style="margin:0">Titles already in this app keep what you set here. Every imported title is followed for new seasons and releases.</p>
+          <div class="btn-pair"><button class="primary" style="margin:0" data-a="trakt-go">Import ${traktPreview.summary.total}</button><button class="ghost-btn" data-a="trakt-cancel">Cancel</button></div>`
+        : `<p class="author">Bring in your watched history, what you're partway through, and your Trakt lists. Use the zip from trakt.tv: Settings › Data › Export.</p>
+          <button class="ghost-btn" style="border-style:solid" data-a="trakt-pick">Choose Trakt export file</button>`}</div>
 
     <div class="card"><h3>Backup file</h3><p class="author">Download or restore your lists as a file.</p>
       <div class="btn-pair"><button class="ghost-btn" data-a="export">Export</button><button class="ghost-btn" data-a="import">Import</button></div></div>

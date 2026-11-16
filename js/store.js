@@ -94,12 +94,56 @@ export function upsertItem(base, patch) {
   };
   // Remember when something was finished, for the yearly count on Overview.
   if (item.status === 'watched' && existing?.status !== 'watched' && !patch.watchedAt) item.watchedAt = now;
-  if (item.status === 'watching' && existing?.status !== 'watching') item.startedAt = now;
+  if (item.status === 'watching' && existing?.status !== 'watching' && !patch.startedAt) item.startedAt = now;
   delete item.deleted;
   lib.items[key] = item;
   lib.updatedAt = now;
   setLibrary(lib);
   return item;
+}
+
+// Add many titles at once (imports). Existing titles keep what you set in this app,
+// except a Watchlist title moves to Watching or Watched if the import says so.
+// Returns how many were added and updated.
+export function bulkImport(list) {
+  const lib = getLibrary();
+  const now = Date.now();
+  let added = 0, updated = 0;
+  const rank = { watchlist: 0, watching: 1, watched: 2 };
+  for (const inc of list) {
+    const key = itemKey(inc.type, inc.id);
+    const prev = lib.items[key];
+    const cur = prev && !prev.deleted ? prev : null;
+    if (!cur) {
+      lib.items[key] = {
+        key, id: inc.id, type: inc.type, title: inc.title, poster: inc.poster ?? null, year: inc.year ?? '',
+        status: inc.status, rating: inc.rating || 0, followed: true, lists: inc.lists || [],
+        addedAt: inc.addedAt || inc.watchedAt || inc.startedAt || now,
+        ...(inc.watchedAt ? { watchedAt: inc.watchedAt } : {}), ...(inc.startedAt ? { startedAt: inc.startedAt } : {}),
+        source: 'trakt', updatedAt: now,
+      };
+      added++;
+    } else {
+      const next = { ...cur, lists: [...new Set([...(cur.lists || []), ...(inc.lists || [])])] };
+      if (rank[inc.status] > rank[cur.status] && cur.status === 'watchlist') {
+        next.status = inc.status;
+        if (inc.watchedAt) next.watchedAt = inc.watchedAt;
+        if (inc.startedAt) next.startedAt = inc.startedAt;
+      }
+      if (!cur.rating && inc.rating) next.rating = inc.rating;
+      if (JSON.stringify(next) !== JSON.stringify(cur)) { next.updatedAt = now; lib.items[key] = next; updated++; }
+    }
+  }
+  lib.updatedAt = now;
+  setLibrary(lib);
+  return { added, updated };
+}
+
+// Quietly fill in details (posters, years) without changing when a title was last edited.
+export function patchQuietly(patches) {
+  const lib = getLibrary();
+  for (const [key, patch] of patches) if (lib.items[key] && !lib.items[key].deleted) Object.assign(lib.items[key], patch, { updatedAt: (lib.items[key].updatedAt || 0) + 1 });
+  setLibrary(lib);
 }
 
 export function removeItem(type, id) {

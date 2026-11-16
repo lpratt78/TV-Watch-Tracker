@@ -1,11 +1,11 @@
 // Service worker: offline app shell, cached TMDB images, network-first TMDB API.
-const VERSION = 'wt-v0.2.1';
+const VERSION = 'wt-v0.3.0';
 const SHELL = `${VERSION}-shell`;
 const IMAGES = 'wt-images';
 const API = 'wt-api';
 const SHELL_FILES = [
   './', 'index.html', 'css/app.css', 'manifest.webmanifest',
-  'js/app.js', 'js/store.js', 'js/tmdb.js', 'js/updates.js', 'js/sync.js',
+  'js/app.js', 'js/store.js', 'js/tmdb.js', 'js/updates.js', 'js/sync.js', 'js/trakt.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
 
