@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.6.0';
+const APP_VERSION = '0.6.1';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -79,15 +79,25 @@ function showProgress(it) {
     const n = nums.find((x) => per(x) < info.seasons[x].aired) ?? nums[nums.length - 1];
     if (n) season = { n, seen: per(n), aired: info.seasons[n].aired };
   }
-  if (!aired) return season ? { seen, aired, left: 0, season } : null;
-  return { seen, aired, left: Math.max(0, aired - seen), season };
+  if (!aired) return season ? { seen, aired, left: 0, season, mins: 0 } : null;
+  const left = Math.max(0, aired - seen);
+  return { seen, aired, left, season, mins: left * (info?.runtime || 0) };
+}
+// Watch time as "2h 30m", "45m" or "3d 4h" for long stretches.
+function fmtTime(mins) {
+  mins = Math.round(mins);
+  if (!mins) return '';
+  if (mins < 60) return `${mins}m`;
+  const h = Math.floor(mins / 60), m = mins % 60;
+  if (h >= 48) { const d = Math.floor(h / 24), hh = h % 24; return `${d}d${hh ? ` ${hh}h` : ''}`; }
+  return `${h}h${m ? ` ${m}m` : ''}`;
 }
 const bar = (a, b) => `<span class="prog" role="progressbar" aria-valuemin="0" aria-valuemax="${b}" aria-valuenow="${a}"><span style="width:${b ? Math.round((a / b) * 100) : 0}%"></span></span>`;
 function progressHtml(it) {
   const p = showProgress(it);
   if (!p || !p.aired) return '';
   return `<div class="progress">${p.season ? `<div class="prog-line"><span>Season ${p.season.n}</span><span>${p.season.seen} of ${p.season.aired}</span></div>${bar(p.season.seen, p.season.aired)}` : bar(p.seen, p.aired)}
-    <div class="prog-sub">${p.seen} of ${p.aired} episodes watched · ${p.left ? `${p.left} left` : 'all caught up'}</div></div>`;
+    <div class="prog-sub"><span>${p.seen} of ${p.aired} watched · ${p.left ? `${p.left} left` : 'all caught up'}</span>${p.left && p.mins ? `<span class="time-left">${fmtTime(p.mins)} left</span>` : ''}</div></div>`;
 }
 const CHECK_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 8.4l2.6 2.6L12 5.4" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
@@ -279,11 +289,12 @@ function renderHome() {
   if (!watching.length) body += '<p class="author">Nothing on Watching right now. Open a show and set it to Watching to start.</p>';
   else {
     const left = watching.reduce((n, it) => n + (showProgress(it)?.left || 0), 0);
+    const mins = watching.reduce((n, it) => n + (showProgress(it)?.mins || 0), 0);
     body += `<button class="stack ${watchOpen ? 'open' : ''}" data-a="toggle-watching" aria-expanded="${watchOpen}">
       <span class="fan">${watching.slice(0, 4).map((it, i) => cover(it, `--i:${i}`, 'w154')).join('')}</span>
       <span class="meta"><span class="title">Watching ${watching.length} ${watching.length === 1 ? 'title' : 'titles'}</span>
         <span class="author">${esc(watching.slice(0, 3).map((i) => i.title).join(', '))}${watching.length > 3 ? ` and ${watching.length - 3} more` : ''}</span>
-        ${left ? `<span class="series">${left} episodes left to watch</span>` : ''}
+        ${left ? `<span class="series">${left} episodes left to watch${mins ? ` · ${fmtTime(mins)}` : ''}</span>` : ''}
         <span class="hint">${watchOpen ? 'Tap to close' : 'Tap to see each one'}</span></span>
       <span class="chev" aria-hidden="true">›</span></button>`;
     if (watchOpen) body += `<div class="stack-list">${watching.map((it) => `<a class="now" href="#/title/${it.type}/${it.id}">${cover(it)}<div class="meta">
@@ -360,7 +371,7 @@ function pctHtml(it) {
   const p = it.type === 'tv' ? showProgress(it) : null;
   if (!p?.aired) return '';
   const n = Math.round((p.seen / p.aired) * 100);
-  return `<span class="pct ${n >= 100 ? 'done' : ''}"><b>${n}%</b><span>complete</span></span>`;
+  return `<span class="pct ${n >= 100 ? 'done' : ''}"><b>${n}%</b><span>complete</span>${p.left && p.mins ? `<em>${fmtTime(p.mins)} left</em>` : ''}</span>`;
 }
 function libCell(it) {
   return `<a class="gcell" href="#/title/${it.type}/${it.id}">${cover(it, '', 'w342')}<span class="t">${esc(it.title)}</span>
@@ -705,6 +716,7 @@ async function renderSeason(r) {
   const watched = (e) => allDone ? (e.air_date && e.air_date <= today) : !!it?.eps?.includes(`${n}x${e.episode_number}`);
   const airedCodes = episodes.filter((e) => e.air_date && e.air_date <= today).map((e) => `${n}x${e.episode_number}`);
   const seenHere = episodes.filter(watched).length;
+  const minsLeft = episodes.filter((e) => e.air_date && e.air_date <= today && !watched(e)).reduce((m, e) => m + (e.runtime || info?.runtime || 0), 0);
   // If the show was marked Watched without episode detail, write the full list out before changing one.
   const expand = () => {
     if (!allDone || !info) return;
@@ -728,7 +740,7 @@ async function renderSeason(r) {
   const body = `
     <a class="season-head" href="#/title/tv/${id}">${cover(t, '', 'w154')}<div class="meta"><span class="title">${esc(t.title)}</span>
       <span class="author">${esc([season.name, season.air_date?.slice(0, 4), `${episodes.length} episodes`].filter(Boolean).join(' · '))}</span>
-      ${airedCodes.length ? `${bar(seenHere, airedCodes.length)}<span class="series">${seenHere} of ${airedCodes.length} watched</span>` : ''}</div></a>
+      ${airedCodes.length ? `${bar(seenHere, airedCodes.length)}<span class="series">${seenHere} of ${airedCodes.length} watched${minsLeft && seenHere < airedCodes.length ? ` · ${fmtTime(minsLeft)} left` : ''}</span>` : ''}</div></a>
     ${season.overview ? `<p class="author" style="margin:10px 0 0">${esc(season.overview)}</p>` : ''}
     ${airedCodes.length ? `<button class="ghost-btn" style="border-style:solid;margin:12px 0 4px" data-a="season-all" data-v="${seenHere >= airedCodes.length ? 'off' : 'on'}">${seenHere >= airedCodes.length ? 'Mark season unwatched' : 'Mark season watched'}</button>` : ''}
     <div class="eps">${episodes.map((e) => {
@@ -1077,7 +1089,8 @@ async function startup() {
     try { await sync.syncNow(); } catch (e) { console.warn('Sync failed', e); }
   } else if (sync.isSignedIn()) sync.preload();
   if (store.getSettings().tmdbKey) {
-    try { await checkUpdates(); } catch (e) { console.warn('Update check failed', e); }
+    const needsInfo = store.listItems().some((i) => i.type === 'tv' && i.followed && store.getShowInfo(i.id)?.runtime === undefined);
+    try { await checkUpdates({ force: needsInfo }); } catch (e) { console.warn('Update check failed', e); }
   }
 }
 window.addEventListener('online', () => { if (sync.isSignedIn()) sync.syncNow().catch(() => {}); });

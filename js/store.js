@@ -239,7 +239,9 @@ export function saveShowInfo(show) {
     aired += a; total += count;
   }
   const all = read(SHOWINFO_KEY, {});
-  all[show.id] = { seasons, aired, total, t: Date.now() };
+  // Typical episode length in minutes, for "time left" estimates.
+  const runtime = (show.episode_run_time || []).find(Boolean) || show.last_episode_to_air?.runtime || show.next_episode_to_air?.runtime || 0;
+  all[show.id] = { seasons, aired, total, runtime, t: Date.now() };
   write(SHOWINFO_KEY, all);
 }
 
