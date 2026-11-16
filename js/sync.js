@@ -52,7 +52,8 @@ export async function signIn({ interactive = true } = {}) {
       },
       error_callback: (err) => reject(new Error(err?.message || err?.type || 'Sign-in was cancelled')),
     });
-    tokenClient.requestAccessToken({ prompt: interactive ? '' : 'none' });
+    // First sign-in always shows the account picker, so you can choose which Google account holds the backup.
+    tokenClient.requestAccessToken({ prompt: !interactive ? 'none' : getSettings().autoSync ? '' : 'select_account' });
   });
 }
 
