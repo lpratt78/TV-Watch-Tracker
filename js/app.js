@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.7.1';
+const APP_VERSION = '0.7.2';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -903,14 +903,70 @@ function renderLists() {
     const shows = on.filter((i) => i.type === 'tv').length;
     const watching = on.filter((i) => i.status === 'watching').length;
     const toWatch = on.filter((i) => i.status === 'watchlist').length;
-    return `<a class="list-card" href="#/list/${encodeURIComponent(n)}">
+    return `<a class="list-card" data-list="${esc(n)}" href="#/list/${encodeURIComponent(n)}">
       <span class="fan">${on.length ? on.slice(0, 4).map((it, i) => cover(it, `--i:${i}`, 'w154')).join('') : '<span class="cover empty-cover" style="--i:0"></span>'}</span>
       <span class="meta"><span class="title">${esc(n)}</span>
         <span class="author">${shows} show${shows === 1 ? '' : 's'} · ${on.length - shows} movie${on.length - shows === 1 ? '' : 's'}</span>
         ${on.length ? `<span class="series">${watching} watching · ${toWatch} to watch</span>` : '<span class="series">Empty</span>'}</span>
       <span class="chev" aria-hidden="true">›</span></a>`;
-  }).join('')}${libraryCard(items)}</div>`;
-  return { top, body };
+  }).join('')}${libraryCard(items)}</div>${names.length > 1 ? '<p class="muted-note" style="text-align:center">Press and hold a list to drag it up or down.</p>' : ''}`;
+  return { top, body, after: () => enableListDrag($('.list-cards')) };
+}
+
+// Press and hold a list card for half a second, then drag it up or down to reorder.
+function enableListDrag(box) {
+  if (!box) return;
+  let card = null, timer = null, startY = 0, lastY = 0, dragging = false, justDragged = false;
+  const cards = () => [...box.querySelectorAll('.list-card[data-list]')];
+  const yOf = (e) => (e.touches ? e.touches[0].clientY : e.clientY);
+  const cancel = () => { clearTimeout(timer); timer = null; if (!dragging) card = null; };
+  const start = (e) => {
+    const c = e.target.closest('.list-card[data-list]');
+    if (!c || (e.button !== undefined && e.button !== 0)) return;
+    card = c; startY = lastY = yOf(e);
+    timer = setTimeout(() => {
+      dragging = true;
+      card.classList.add('dragging'); box.classList.add('sorting');
+      navigator.vibrate?.(15);
+    }, 450);
+  };
+  const move = (e) => {
+    if (!card) return;
+    lastY = yOf(e);
+    if (!dragging) { if (Math.abs(lastY - startY) > 8) cancel(); return; }
+    e.preventDefault();
+    card.style.transform = `translateY(${lastY - startY}px)`;
+    const mid = card.getBoundingClientRect().top + card.offsetHeight / 2;
+    const list = cards();
+    const i = list.indexOf(card);
+    const prev = list[i - 1], next = list[i + 1];
+    const swap = (target, before) => {
+      const top0 = card.offsetTop;
+      before ? box.insertBefore(card, target) : target.after(card);
+      startY += card.offsetTop - top0;
+      card.style.transform = `translateY(${lastY - startY}px)`;
+    };
+    if (prev && mid < prev.getBoundingClientRect().top + prev.offsetHeight / 2) swap(prev, true);
+    else if (next && mid > next.getBoundingClientRect().top + next.offsetHeight / 2) swap(next, false);
+  };
+  const end = () => {
+    clearTimeout(timer); timer = null;
+    if (dragging && card) {
+      card.style.transform = ''; card.classList.remove('dragging'); box.classList.remove('sorting');
+      justDragged = true; setTimeout(() => { justDragged = false; }, 400);
+      store.setListOrder(cards().map((c) => c.dataset.list));
+    }
+    dragging = false; card = null;
+  };
+  box.addEventListener('touchstart', start, { passive: true });
+  box.addEventListener('touchmove', move, { passive: false });
+  box.addEventListener('touchend', end); box.addEventListener('touchcancel', end);
+  box.addEventListener('mousedown', start);
+  window.addEventListener('mousemove', move);
+  window.addEventListener('mouseup', end, { once: false });
+  box.addEventListener('click', (e) => { if (justDragged) { e.preventDefault(); e.stopPropagation(); } }, true);
+  box.addEventListener('contextmenu', (e) => { if (e.target.closest('.list-card[data-list]')) e.preventDefault(); });
+  box.addEventListener('dragstart', (e) => e.preventDefault());
 }
 // The whole library, as the last card on the Lists screen.
 function libraryCard(items) {

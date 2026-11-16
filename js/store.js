@@ -183,7 +183,17 @@ export function listNames() {
   const lib = getLibrary();
   const names = new Set(Object.entries(lib.listDefs).filter(([, d]) => !d.deleted).map(([n]) => n));
   for (const it of Object.values(lib.items)) if (!it.deleted) for (const n of it.lists || []) names.add(n);
-  return [...names].sort((a, b) => a.localeCompare(b));
+  // Your own order first (dragged on the Lists screen), then anything new alphabetically.
+  const order = lib.listOrder?.names || [];
+  const pos = (n) => { const i = order.indexOf(n); return i < 0 ? Infinity : i; };
+  return [...names].sort((a, b) => pos(a) - pos(b) || a.localeCompare(b));
+}
+export function setListOrder(names) {
+  const lib = getLibrary();
+  const now = Date.now();
+  lib.listOrder = { names, updatedAt: now };
+  lib.updatedAt = now;
+  setLibrary(lib);
 }
 export function createList(name) {
   name = name.trim();
@@ -203,6 +213,7 @@ export function renameList(from, to) {
   const now = Date.now();
   lib.listDefs[from] = { ...(lib.listDefs[from] || { createdAt: now }), deleted: true, updatedAt: now };
   lib.listDefs[to] = { createdAt: now, updatedAt: now };
+  if (lib.listOrder?.names) lib.listOrder = { names: lib.listOrder.names.map((n) => (n === from ? to : n)), updatedAt: now };
   for (const it of Object.values(lib.items)) if (!it.deleted && it.lists?.includes(from)) { it.lists = it.lists.map((n) => (n === from ? to : n)); it.updatedAt = now; }
   lib.updatedAt = now;
   setLibrary(lib);
@@ -273,6 +284,8 @@ export function mergeLibraries(a, b) {
     const x = a.listDefs?.[k], y = b.listDefs?.[k];
     out.listDefs[k] = !x ? y : !y ? x : (y.updatedAt > x.updatedAt ? y : x);
   }
+  const oa = a.listOrder, ob = b.listOrder;
+  if (oa || ob) out.listOrder = !oa ? ob : !ob ? oa : (ob.updatedAt > oa.updatedAt ? ob : oa);
   // Drop seen markers and tombstones older than 180 days to keep the file small.
   const cutoff = Date.now() - 180 * 864e5;
   for (const [k, ts] of Object.entries(out.seenUpdates)) if (ts < cutoff) delete out.seenUpdates[k];

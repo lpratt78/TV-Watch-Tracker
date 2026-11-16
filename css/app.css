@@ -343,3 +343,8 @@ section[data-home-row] .section-h{margin-top:18px}
 .stack-foot{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--muted)}
 .stack-foot b{font:700 15px var(--display);color:var(--ink)}
 .stack-foot span:not(.chev){flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}
+
+/* Reordering list cards */
+.list-card[data-list]{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow .15s}
+.list-card.dragging{position:relative;z-index:5;box-shadow:0 10px 24px rgba(0,0,0,.28);border-color:var(--accent);transition:none}
+.list-cards.sorting .list-card:not(.dragging){opacity:.85}
