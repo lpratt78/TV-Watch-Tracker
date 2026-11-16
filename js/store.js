@@ -121,7 +121,7 @@ export function bulkImport(list) {
     if (!cur) {
       lib.items[key] = {
         key, id: inc.id, type: inc.type, title: inc.title, poster: inc.poster ?? null, year: inc.year ?? '',
-        status: inc.status, rating: inc.rating || 0, followed: true, lists: inc.lists || [], ...(inc.eps?.length ? { eps: inc.eps } : {}),
+        status: inc.status, rating: inc.rating || 0, followed: true, lists: inc.lists || [], ...(inc.eps?.length ? { eps: inc.eps } : {}), ...(inc.progress ? { progress: inc.progress } : {}),
         addedAt: inc.addedAt || inc.watchedAt || inc.startedAt || now,
         ...(inc.watchedAt ? { watchedAt: inc.watchedAt } : {}), ...(inc.startedAt ? { startedAt: inc.startedAt } : {}),
         source: 'trakt', updatedAt: now,
@@ -130,6 +130,7 @@ export function bulkImport(list) {
     } else {
       const next = { ...cur, lists: [...new Set([...(cur.lists || []), ...(inc.lists || [])])] };
       if (inc.eps?.length) next.eps = [...new Set([...(cur.eps || []), ...inc.eps])];
+      if (inc.progress && !cur.progress) next.progress = inc.progress;
       if (rank[inc.status] > rank[cur.status] && cur.status === 'watchlist') {
         next.status = inc.status;
         if (inc.watchedAt) next.watchedAt = inc.watchedAt;
@@ -261,7 +262,11 @@ export function mergeLibraries(a, b) {
   for (const k of keys) {
     const x = a.items?.[k];
     const y = b.items?.[k];
-    out.items[k] = !x ? y : !y ? x : (y.updatedAt > x.updatedAt ? y : x);
+    let win = !x ? y : !y ? x : (y.updatedAt > x.updatedAt ? y : x);
+    // A copy without episode detail (from an older version of the app) must not wipe out watched episodes.
+    const other = win === x ? y : x;
+    if (win && other && !win.deleted && !other.deleted && !win.eps?.length && other.eps?.length) win = { ...win, eps: other.eps };
+    out.items[k] = win;
   }
   out.seenUpdates = { ...(b.seenUpdates || {}), ...(a.seenUpdates || {}) };
   for (const k of new Set([...Object.keys(a.listDefs || {}), ...Object.keys(b.listDefs || {})])) {
