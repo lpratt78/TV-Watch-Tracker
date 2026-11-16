@@ -1,4 +1,4 @@
-# Watch Tracker
+# Movie & Show Tracker
 
 A personal movie and TV tracker that installs as an app on iPhone, Android, and Windows (PWA).
 

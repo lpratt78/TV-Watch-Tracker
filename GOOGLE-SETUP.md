@@ -2,10 +2,10 @@
 
 About 10 minutes. Do this once the hosted URL exists (for GitHub Pages: `https://lpratt78.github.io`).
 
-1. **Create a project.** Go to console.cloud.google.com → project picker → New project → name it `Watch Tracker` → Create, then select it.
+1. **Create a project.** Go to console.cloud.google.com → project picker → New project → name it `Movie & Show Tracker` → Create, then select it.
 2. **Turn on the Drive API.** APIs & Services → Library → search "Google Drive API" → Enable.
 3. **Set up the consent screen** (Google Auth Platform / OAuth consent screen).
-   - App name `Watch Tracker`, your Gmail as support and developer contact.
+   - App name `Movie & Show Tracker`, your Gmail as support and developer contact.
    - Audience: **External**.
    - Data access / Scopes: add `https://www.googleapis.com/auth/drive.appdata` (shown as "See, create, and delete its own configuration data in your Google Drive").
 4. **Keep it in Testing mode and add yourself.** Audience → Publishing status **Testing** → Test users → Add users → your Google account. Only listed test users can sign in.

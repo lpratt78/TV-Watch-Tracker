@@ -1,6 +1,6 @@
 {
-  "name": "Watch Tracker",
-  "short_name": "Watch",
+  "name": "Movie & Show Tracker",
+  "short_name": "Movie & Show",
   "description": "Track movies and shows you want to watch, are watching, and have watched.",
   "id": "./",
   "start_url": "./#/discover",

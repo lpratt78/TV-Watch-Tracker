@@ -154,6 +154,6 @@ export function exportJSON() {
 }
 export function importJSON(text) {
   const incoming = JSON.parse(text);
-  if (!incoming || typeof incoming.items !== 'object') throw new Error('Not a Watch Tracker backup file');
+  if (!incoming || typeof incoming.items !== 'object') throw new Error('Not a Movie & Show Tracker backup file');
   setLibrary(mergeLibraries(getLibrary(), incoming));
 }

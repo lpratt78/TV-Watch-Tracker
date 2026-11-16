@@ -43,7 +43,7 @@ const skeletons = (n = 8) => Array.from({ length: n }, () => '<div class="card s
 
 function missingKeyPanel() {
   return `<div class="panel"><h2>Add your TMDB key</h2>
-    <p class="muted">Watch Tracker gets movie and show info from TMDB. Paste your free personal API key in Settings to get started. It stays on this device.</p>
+    <p class="muted">Movie &amp; Show Tracker gets movie and show info from TMDB. Paste your free personal API key in Settings to get started. It stays on this device.</p>
     <a class="btn primary" href="#/settings">Open Settings</a></div>`;
 }
 function errorPanel(e) {
@@ -402,7 +402,7 @@ async function renderSettings() {
   $('#sign-out')?.addEventListener('click', () => { sync.signOut(); renderSettings(); });
   $('#export').addEventListener('click', () => {
     const blob = new Blob([store.exportJSON()], { type: 'application/json' });
-    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `watch-tracker-${new Date().toISOString().slice(0, 10)}.json` });
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `movie-show-tracker-${new Date().toISOString().slice(0, 10)}.json` });
     a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   });
   $('#import').addEventListener('change', async (e) => {
@@ -462,7 +462,7 @@ function refreshSyncBadge(st = sync.syncState()) {
 function renderAbout() {
   titleEl.textContent = 'About';
   view.innerHTML = `
-    <div class="panel"><h2>Watch Tracker</h2>
+    <div class="panel"><h2>Movie &amp; Show Tracker</h2>
       <p class="muted small">Version ${APP_VERSION}. A personal tracker for movies and shows.</p></div>
     <div class="panel"><h2>Data from TMDB</h2>
       <a href="https://www.themoviedb.org" target="_blank" rel="noopener"><img class="tmdb-logo" alt="The Movie Database (TMDB)"
