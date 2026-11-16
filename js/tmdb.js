@@ -53,6 +53,7 @@ export function norm(r, fallbackType) {
     year: date ? date.slice(0, 4) : '',
     vote: r.vote_average || 0,
     overview: r.overview || '',
+    genres: r.genre_ids || (r.genres || []).map((g) => g.id),
   };
 }
 

@@ -14,6 +14,7 @@ const DEFAULT_SETTINGS = {
   services: null,       // null = default rows (KNOWN_SERVICES in tmdb.js); otherwise TMDB provider IDs.
   autoSync: false,      // Set true once the user signs in with Google.
   name: '',             // Shown on the Me screen.
+  genres: [],           // Genre names you like, used to filter Discover, Overview and the Library.
 };
 
 function read(key, fallback) {
@@ -253,7 +254,7 @@ export function saveShowInfo(show) {
   const all = read(SHOWINFO_KEY, {});
   // Typical episode length in minutes, for "time left" estimates.
   const runtime = (show.episode_run_time || []).find(Boolean) || show.last_episode_to_air?.runtime || show.next_episode_to_air?.runtime || 0;
-  all[show.id] = { seasons, aired, total, runtime, status: show.status || '', t: Date.now() };
+  all[show.id] = { seasons, aired, total, runtime, status: show.status || '', genres: (show.genres || []).map((g) => g.id), t: Date.now() };
   write(SHOWINFO_KEY, all);
 }
 

@@ -348,3 +348,13 @@ section[data-home-row] .section-h{margin-top:18px}
 .list-card[data-list]{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;transition:box-shadow .15s}
 .list-card.dragging{position:relative;z-index:5;box-shadow:0 10px 24px rgba(0,0,0,.28);border-color:var(--accent);transition:none}
 .list-cards.sorting .list-card:not(.dragging){opacity:.85}
+
+/* Genres and services */
+.genre-chips{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:4px -16px 2px;padding:2px 16px 4px}
+.genre-chips::-webkit-scrollbar{display:none}
+.genre-chips .chip{flex:none}
+.where-line{display:flex;flex-wrap:wrap;align-items:center;gap:4px;font-size:11.5px;color:var(--muted)}
+.where-chip{display:inline-flex;align-items:center;gap:4px;background:var(--grey-soft);color:var(--ink);border-radius:999px;padding:1px 7px 1px 2px;font-weight:600}
+.where-chip img{width:16px;height:16px;border-radius:50%}
+.none-card{border-style:dashed}
+.svc-none-icon{width:44px;height:44px;border-radius:10px;flex:none;display:grid;place-items:center;background:var(--grey-soft);color:var(--muted);font:700 20px var(--display)}

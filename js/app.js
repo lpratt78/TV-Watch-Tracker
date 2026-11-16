@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.7.2';
+const APP_VERSION = '0.8.0';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -311,6 +311,7 @@ function renderHome() {
   const all = store.listItems();
   const hasKey = !!store.getSettings().tmdbKey;
   const homeRows = ['trending-tv', 'for-you', 'popular-tv', 'new-tv'];
+  if (!genreCat) loadGenres().catch(() => {});
   const rowsHtml = hasKey ? homeRows.map((k) => `<section data-home-row="${k}"><div class="section-h"><span>${esc(rowSpec(k).title)}</span><a href="#/browse/${k}">See all ›</a></div><div class="shelf-scroll">${skeletonRow()}</div></section>`).join('') : '';
   const loadRows = () => {
     const io = new IntersectionObserver((ents) => {
@@ -319,7 +320,11 @@ function renderHome() {
         io.unobserve(en.target);
         const sc = en.target.querySelector('.shelf-scroll');
         loadRow(en.target.dataset.homeRow, 1, 'tv').then(({ items }) => {
-          const list = notInLibrary(items).filter((t) => t.type === 'tv').slice(0, 20);
+          let list = notInLibrary(items).filter((t) => t.type === 'tv');
+          // Lean toward the genres you picked under Me, unless that leaves too little.
+          const gs = myGenres();
+          if (gs.length) { const mine = list.filter((t) => inAnyGenre(t, gs)); if (mine.length >= 6) list = mine; }
+          list = list.slice(0, 20);
           sc.innerHTML = list.length ? list.map(sugCard).join('') : '<p class="author">Nothing new here right now.</p>';
           fillRunStatus(sc);
         }).catch((e) => { sc.outerHTML = errorBox(e); });
@@ -371,34 +376,67 @@ function renderHome() {
     body += '<div class="section-h">Up next <a href="#/library">Library ›</a></div>' + `<div class="shelf-scroll">${watchlist.map((it) => `<a class="sug" href="#/title/${it.type}/${it.id}">${cover(it, '', 'w342')}<span class="t">${esc(it.title)}</span><span class="why">${esc(typeTxt(it))}${runTag(it)}</span></a>`).join('')}</div>`;
   }
   body += rowsHtml;
-  return { top, body, after: () => { autoScroll($('#coming')); loadRows(); if (tw.pending) fetchMovieRuntimes(); } };
+  return { top, body, after: () => { autoScroll($('#coming')); loadRows(); if (tw.pending) fetchMovieInfo(); } };
 }
 
+// Run time and genres for movies in the library, kept on this device: { id: { r: minutes, g: [genre ids] } }.
+const MOVIE_INFO_KEY = 'wt.movieInfo';
+const movieInfo = () => { try { return JSON.parse(localStorage.getItem(MOVIE_INFO_KEY) || '{}'); } catch { return {}; } };
 // Total time watched: episodes watched times each show's episode length, plus watched movies' run times.
-const MOVIE_RT_KEY = 'wt.movieRuntime';
-const movieRuntimes = () => { try { return JSON.parse(localStorage.getItem(MOVIE_RT_KEY) || '{}'); } catch { return {}; } };
 function timeWatched(all) {
-  const rt = movieRuntimes();
+  const mi = movieInfo();
   let mins = 0, pending = false;
   for (const it of all) {
     if (it.type === 'tv') { const p = showProgress(it); const info = store.getShowInfo(it.id); if (p && info?.runtime) mins += p.seen * info.runtime; }
-    else if (it.status === 'watched') { if (rt[it.id] === undefined) pending = true; else mins += rt[it.id]; }
+    else if (it.status === 'watched') { if (!mi[it.id]) pending = true; else mins += mi[it.id].r || 0; }
   }
   return { mins, pending: pending && !!store.getSettings().tmdbKey };
 }
-let fetchingRuntimes = false;
-async function fetchMovieRuntimes() {
-  if (fetchingRuntimes) return; // once per app open, so being offline can't loop
-  fetchingRuntimes = true;
-  const rt = movieRuntimes();
-  const todo = store.listItems('watched').filter((i) => i.type === 'movie' && rt[i.id] === undefined);
+let fetchingMovies = false;
+async function fetchMovieInfo() {
+  if (fetchingMovies) return; // once per app open, so being offline can't loop
+  fetchingMovies = true;
+  const mi = movieInfo();
+  const todo = store.listItems().filter((i) => i.type === 'movie' && !mi[i.id]);
   let i = 0;
   await Promise.all(Array.from({ length: 4 }, async () => {
-    while (i < todo.length) { const it = todo[i++]; try { rt[it.id] = (await T.movieLite(it.id)).runtime || 0; } catch { /* try again next time */ } }
+    while (i < todo.length) { const it = todo[i++]; try { const d = await T.movieLite(it.id); mi[it.id] = { r: d.runtime || 0, g: (d.genres || []).map((g) => g.id) }; } catch { /* try again next time */ } }
   }));
-  try { localStorage.setItem(MOVIE_RT_KEY, JSON.stringify(rt)); } catch { /* ignore */ }
-  if (current.name === 'home') redraw();
+  try { localStorage.setItem(MOVIE_INFO_KEY, JSON.stringify(mi)); } catch { /* ignore */ }
+  if (todo.length && ['home', 'library', 'list', 'service'].includes(current.name)) redraw();
 }
+
+// ---------- Genres ----------
+// TMDB has separate movie and TV genre lists ("Action" vs "Action & Adventure"), so they're joined by name.
+const GENRE_KEY = 'wt.genres';
+let genreCat = (() => { try { return JSON.parse(localStorage.getItem(GENRE_KEY) || 'null'); } catch { return null; } })();
+async function loadGenres() {
+  const lang = store.getSettings().language;
+  if (genreCat?.list?.length && genreCat.lang === lang) return genreCat;
+  const [m, t] = await Promise.all([T.tmdb('/genre/movie/list'), T.tmdb('/genre/tv/list')]);
+  const alias = { 'Science Fiction': 'Sci-Fi' };
+  const tv = t.genres || [];
+  const usedTv = new Set();
+  const list = [];
+  for (const g of m.genres || []) {
+    if (g.name === 'TV Movie') continue;
+    const n = alias[g.name] || g.name;
+    const tvIds = tv.filter((x) => x.name === g.name || x.name.split(' & ').includes(n)).map((x) => x.id);
+    tvIds.forEach((x) => usedTv.add(x));
+    list.push({ name: g.name, movie: [g.id], tv: tvIds });
+  }
+  for (const g of tv) if (!usedTv.has(g.id)) list.push({ name: g.name, movie: [], tv: [g.id] });
+  list.sort((a, b) => a.name.localeCompare(b.name));
+  genreCat = { lang, list };
+  try { localStorage.setItem(GENRE_KEY, JSON.stringify(genreCat)); } catch { /* ignore */ }
+  return genreCat;
+}
+const genreByName = (n) => genreCat?.list.find((g) => g.name === n) || null;
+const myGenres = () => (store.getSettings().genres || []).map(genreByName).filter(Boolean);
+// Genre ids for a title: from TMDB results directly, or cached details for library titles.
+const genreIdsOf = (t) => (t.genres?.length ? t.genres : t.type === 'tv' ? store.getShowInfo(t.id)?.genres : movieInfo()[t.id]?.g) || null;
+const inGenre = (t, g) => { const ids = genreIdsOf(t); return !!ids && ids.some((i) => (g[t.type] || []).includes(i)); };
+const inAnyGenre = (t, gs) => gs.some((g) => inGenre(t, g));
 
 // Slowly scroll a row sideways on its own, looping. Pauses while you touch it.
 function autoScroll(el) {
@@ -443,7 +481,16 @@ function libRow(it) {
     ${it.rating ? stars(it.rating) : ''}
     ${it.type === 'tv' && it.status !== 'watchlist' ? progressHtml(it) : ''}
     ${it.status === 'watched' && it.watchedAt ? `<span class="series">Watched ${new Date(it.watchedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>` : ''}
+    ${current.name === 'service' && current.args[0] === NONE_SVC ? whereLine(it) : ''}
     ${it.followed ? indicators(it.type, it.id) : ''}</div>${pctHtml(it)}</a>`;
+}
+// Which services a title streams on (used on the "No selected services" screen).
+function whereLine(it) {
+  const w = whereStore().items[it.key];
+  if (!w) return '<span class="where-line">Not checked yet</span>';
+  const svcs = whereServices();
+  if (!w.s.length) return '<span class="where-line">Not streaming right now (rent or buy only)</span>';
+  return `<span class="where-line">On ${w.s.map((k) => `<span class="where-chip">${svcs[k]?.logo ? `<img src="${esc(T.img(svcs[k].logo, 'w92'))}" alt="">` : ''}${esc(k)}</span>`).join('')}</span>`;
 }
 // Percent of the series watched, shown on the right of a show card.
 function pctHtml(it) {
@@ -457,18 +504,29 @@ function libCell(it) {
     <span class="st">${it.rating ? stars(it.rating) : statusTag(it.status)}</span></a>`;
 }
 
-function renderLibrary(r) {
+async function renderLibrary(r) {
   const listName = r?.name === 'list' ? decodeURIComponent(r.args[0] || '') : '';
   if (listName && !store.listNames().includes(listName)) { location.hash = '#/lists'; return {}; }
   const svc = r?.name === 'service' ? decodeURIComponent(r.args[0] || '') : '';
-  const svcInfo = svc ? whereServices()[svc] : null;
-  if (svc && !svcInfo) { location.hash = '#/services'; return {}; }
+  let svcInfo = null, mine = [];
+  if (svc) {
+    mine = await myServices();
+    svcInfo = svc === NONE_SVC ? { name: 'No selected services' } : (mine.find((m) => m.key === svc) || whereServices()[svc] || null);
+    if (!svcInfo) { location.hash = '#/services'; return {}; }
+  }
+  const mineKeys = new Set(mine.map((m) => m.key));
+  const inSvc = (i) => (svc === NONE_SVC ? !whereOf(i).some((k) => mineKeys.has(k)) : whereOf(i).includes(svc));
+  // Genre filter: only offered once you've picked genres under Me.
+  const gs = myGenres();
+  if (libState.genre && !gs.some((g) => g.name === libState.genre)) libState.genre = '';
+  const libGenre = genreByName(libState.genre);
+  if (gs.length || libGenre) fetchMovieInfo();
   const top = svc
     ? `<button class="icon-btn" data-a="back">‹ Services</button><h2>${svcInfo.logo ? `<img class="h-logo" src="${esc(T.img(svcInfo.logo, 'w92'))}" alt="">` : ''}${esc(svcInfo.name)}</h2>`
     : listName
     ? `<button class="icon-btn" data-a="back">‹ Lists</button><h2>${esc(listName)}</h2>`
     : '<button class="icon-btn" data-a="back">‹ Lists</button><h2>Library</h2><a class="plus-btn" href="#/discover" aria-label="Add a movie or show">+</a>';
-  const all = store.listItems().filter((i) => (libState.type === 'all' || i.type === libState.type) && (!listName || (i.lists || []).includes(listName)) && (!svc || whereOf(i).includes(svc)));
+  const all = store.listItems().filter((i) => (libState.type === 'all' || i.type === libState.type) && (!listName || (i.lists || []).includes(listName)) && (!svc || inSvc(i)) && (!libGenre || inGenre(i, libGenre)));
   const counts = { all: all.length };
   for (const k of Object.keys(STATUS)) counts[k] = all.filter((i) => i.status === k).length;
   const sorters = {
@@ -484,13 +542,14 @@ function renderLibrary(r) {
     <div class="toolbar">
       <div class="seg" role="group" aria-label="Type">${[['all', 'All'], ['movie', 'Movies'], ['tv', 'Shows']].map(([k, l]) => `<button data-a="lib-type" data-v="${k}" aria-pressed="${libState.type === k}">${l}</button>`).join('')}</div>
       <span class="grow"></span>
+      ${gs.length ? `<select id="lib-genre" aria-label="Genre"><option value="">All genres</option>${gs.map((g) => `<option ${libState.genre === g.name ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select>` : ''}
       <select id="lib-sort" aria-label="Sort">${[['recent', 'Recent'], ['title', 'Title'], ['rating', 'Rating'], ['year', 'Year']].map(([k, l]) => `<option value="${k}" ${libState.sort === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <div class="seg" role="group" aria-label="View"><button data-a="lib-view" data-v="list" aria-pressed="${libState.view === 'list'}" aria-label="List">☰</button><button data-a="lib-view" data-v="grid" aria-pressed="${libState.view === 'grid'}" aria-label="Grid">▦</button></div>
     </div>`;
 
   if (!list.length) {
     body += svc
-      ? `<div class="empty-state"><p>Nothing ${libState.shelf === 'all' ? '' : `on ${STATUS[libState.shelf].name} `}in your library streams on ${esc(svcInfo.name)} right now.</p></div>`
+      ? `<div class="empty-state"><p>${svc === NONE_SVC ? 'Everything here streams on a service you have.' : `Nothing ${libState.shelf === 'all' ? '' : `on ${STATUS[libState.shelf].name} `}in your library streams on ${esc(svcInfo.name)} right now.`}${libGenre ? ` (Showing ${esc(libGenre.name)} only.)` : ''}</p></div>`
       : listName
       ? `<div class="empty-state"><p>${libState.shelf === 'all' ? `Nothing on ${esc(listName)} yet.` : `Nothing on ${esc(listName)} is on ${STATUS[libState.shelf].name}.`} Open any show or movie and tap the list name to add it.</p></div>`
       : `<div class="empty-state"><p>${libState.shelf === 'all' ? 'Nothing here yet.' : `Nothing on ${STATUS[libState.shelf].name} yet.`}</p><a class="ghost-btn" href="#/discover">Find something to watch</a></div>`;
@@ -504,14 +563,16 @@ function renderLibrary(r) {
   } else {
     body += list.map(libRow).join('');
   }
-  return { top, body, after: () => { $('#lib-sort')?.addEventListener('change', (e) => { libState.sort = e.target.value; saveLib(); redraw(); }); } };
+  return { top, body, after: () => { $('#lib-sort')?.addEventListener('change', (e) => { libState.sort = e.target.value; saveLib(); redraw(); }); $('#lib-genre')?.addEventListener('change', (e) => { libState.genre = e.target.value; saveLib(); redraw(); }); } };
 }
 
 // ---------- Discover ----------
 let discType = 'all';
 let discQuery = '';
+let discGenre = '';
 Object.assign(actions, {
   'disc-type': (el) => { discType = el.dataset.v; redraw(); },
+  'disc-genre': (el) => { discGenre = el.dataset.v; redraw(); },
   'refresh-discover': () => { T.clearMemo(); redraw(); },
 });
 
@@ -541,15 +602,30 @@ async function renderDiscover() {
     <div class="seg" role="group" aria-label="Show" style="margin-bottom:6px">${[['all', 'All'], ['movie', 'Movies'], ['tv', 'Shows']].map(([k, l]) => `<button data-a="disc-type" data-v="${k}" aria-pressed="${discType === k}">${l}</button>`).join('')}</div>`;
   if (!store.getSettings().tmdbKey) return { top, body: head + errorBox(new T.MissingKeyError()) };
 
+  try { await loadGenres(); } catch { /* offline: no genre chips */ }
+  // Genre chips: the genres you picked under Me, or every genre if you haven't picked any.
+  const chipGenres = myGenres().length ? myGenres() : (genreCat?.list || []);
+  const genre = genreByName(discGenre);
+  if (discGenre && !genre) discGenre = '';
+  const genreChips = chipGenres.length ? `<div class="chips genre-chips" role="group" aria-label="Genre"><button class="chip" data-a="disc-genre" data-v="" aria-pressed="${!discGenre}">All genres</button>${chipGenres.map((g) => `<button class="chip" data-a="disc-genre" data-v="${esc(g.name)}" aria-pressed="${discGenre === g.name}">${esc(g.name)}</button>`).join('')}</div>` : '';
+
+  // Every streaming service gets a row: yours first (picked under Me), then the rest.
   let services = [];
-  try { services = await T.selectedServices(); } catch { /* offline with no saved list */ }
+  try {
+    const mine = await T.selectedServices();
+    const ids = new Set(mine.map((p) => p.id));
+    const others = T.matchKnown(await T.providerList()).map((k) => k.provider).filter((p) => p && !ids.has(p.id));
+    services = [...mine, ...others];
+  } catch { /* offline with no saved list */ }
   const rows = ['trending', 'popular-movie', 'popular-tv', 'upcoming-movie', 'onair-tv', 'new-tv', ...services.map((p) => `provider-${p.id}`)]
     .map((key) => ({ key, ...rowSpec(key, services) }))
-    .filter((r) => !r.type || discType === 'all' || r.type === discType);
+    .filter((r) => !r.type || discType === 'all' || r.type === discType)
+    .map((r) => (genre && !r.provider ? { ...r, title: `${r.title} · ${genre.name}` } : r));
+  const qs = (r) => { const q = new URLSearchParams(); if (discType !== 'all' && !r.type) q.set('type', discType); if (genre) q.set('genre', genre.name); const x = q.toString(); return x ? `?${x}` : ''; };
 
-  const rowsHtml = rows.map((r, i) => `<section data-row="${i}"><div class="section-h"><span>${r.logo ? `<img src="${esc(T.img(r.logo, 'w92'))}" alt="">` : ''}${esc(r.title)}</span><a href="#/browse/${r.key}${discType !== 'all' && !r.type ? `?type=${discType}` : ''}">See all ›</a></div>
+  const rowsHtml = rows.map((r, i) => `<section data-row="${i}"><div class="section-h"><span>${r.logo ? `<img src="${esc(T.img(r.logo, 'w92'))}" alt="">` : ''}${esc(r.title)}</span><a href="#/browse/${r.key}${qs(r)}">See all ›</a></div>
     <div class="shelf-scroll">${skeletonRow()}</div></section>`).join('');
-  const body = `${head}<div id="results"></div><div id="rows">${rowsHtml}</div>`;
+  const body = `${head}${genreChips}<div id="results"></div><div id="rows">${rowsHtml}</div>`;
 
   return {
     top, body,
@@ -560,9 +636,9 @@ async function renderDiscover() {
           io.unobserve(en.target);
           const r = rows[Number(en.target.dataset.row)];
           const sc = en.target.querySelector('.shelf-scroll');
-          loadRow(r.key, 1, discType).then(({ items }) => {
+          loadRow(r.key, 1, discType, genre).then(({ items }) => {
             const list = byType(items).slice(0, 20);
-            sc.innerHTML = list.length ? list.map(sugCard).join('') : '<p class="author">Nothing here right now.</p>';
+            sc.innerHTML = list.length ? list.map(sugCard).join('') : `<p class="author">Nothing here${genre ? ` in ${esc(genre.name)}` : ''} right now.</p>`;
             fillRunStatus(sc);
           }).catch((e) => { sc.outerHTML = errorBox(e); });
         }
@@ -578,7 +654,7 @@ async function renderDiscover() {
         rowsEl.hidden = true;
         out.innerHTML = '<p class="loading">Searching…</p>';
         try {
-          const res = byType(await T.search(term.trim()));
+          const res = byType(await T.search(term.trim())).filter((t) => !genre || inGenre(t, genre));
           if (my !== seq) return;
           out.innerHTML = res.length ? `<div class="section-h">Results</div>${res.map(resultRow).join('')}` : `<div class="empty-note">No results for “${esc(term)}”.</div>`;
           fillRunStatus(out);
@@ -613,24 +689,36 @@ function rowSpec(key, services = []) {
   }
   return null;
 }
-// Load one page of a row. Returns { items, more }.
-async function loadRow(key, page = 1, type = 'all') {
+// Load one page of a row, optionally in one genre. Returns { items, more }.
+async function loadRow(key, page = 1, type = 'all', genre = null) {
   const spec = rowSpec(key);
   if (!spec) throw new Error('That list is not available.');
-  if (key === 'for-you') return suggestions(page);
+  const gIds = (t) => (genre ? (genre[t] || []).join('|') : '');
+  if (key === 'for-you') { const r = await suggestions(page); return genre ? { ...r, items: r.items.filter((t) => inGenre(t, genre)) } : r; }
+  // Popular rows in a genre come from TMDB's discover search, which can filter by genre.
+  if (genre && (key === 'popular-movie' || key === 'popular-tv')) {
+    const t = spec.type;
+    if (!gIds(t)) return { items: [], more: false };
+    const d = await T.tmdb(`/discover/${t}`, { with_genres: gIds(t), sort_by: 'popularity.desc', 'vote_count.gte': 50, page });
+    return { items: (d.results || []).map((r) => T.norm(r, t)), more: page < Math.min(d.total_pages || 1, 500) };
+  }
   if (spec.provider) {
     const region = store.getSettings().region;
-    const types = type === 'all' ? ['tv', 'movie'] : [type];
-    const res = await Promise.all(types.map((t) => T.tmdb(`/discover/${t}`, { with_watch_providers: spec.provider, watch_region: region, with_watch_monetization_types: 'flatrate', sort_by: 'popularity.desc', page })
+    const types = (type === 'all' ? ['tv', 'movie'] : [type]).filter((t) => !genre || gIds(t));
+    if (!types.length) return { items: [], more: false };
+    const res = await Promise.all(types.map((t) => T.tmdb(`/discover/${t}`, { with_watch_providers: spec.provider, watch_region: region, with_watch_monetization_types: 'flatrate|free|ads', sort_by: 'popularity.desc', with_genres: gIds(t), page })
       .then((d) => ({ t, d }))));
     const lists = res.map(({ t, d }) => (d.results || []).map((r) => T.norm(r, t)));
     const items = [];
     for (let i = 0; i < Math.max(...lists.map((l) => l.length)); i++) for (const l of lists) if (l[i]) items.push(l[i]);
     return { items, more: res.some(({ d }) => page < Math.min(d.total_pages || 1, 500)) };
   }
-  const d = await T.tmdb(spec.path(type), { ...(spec.params?.() || {}), page });
+  if (genre && spec.type && !gIds(spec.type)) return { items: [], more: false };
+  const extra = genre && key === 'new-tv' ? { with_genres: gIds('tv') } : {};
+  const d = await T.tmdb(spec.path(type), { ...(spec.params?.() || {}), ...extra, page });
   let items = (d.results || []).filter((r) => !r.media_type || r.media_type === 'movie' || r.media_type === 'tv').map((r) => T.norm(r, spec.type));
   if (spec.keep) items = items.filter(spec.keep);
+  if (genre) items = items.filter((t) => inGenre(t, genre));
   return { items, more: page < Math.min(d.total_pages || 1, 500) };
 }
 // Shows like the ones you rate highly or are watching, that aren't in your library yet.
@@ -651,8 +739,11 @@ const notInLibrary = (items) => items.filter((t) => !store.getItem(t.type, t.id)
 async function renderBrowse(r) {
   const key = r.args[0] || '';
   let services = [];
-  if (key.startsWith('provider-')) { try { services = await T.selectedServices(); } catch { /* ignore */ } }
-  const spec = rowSpec(key, services);
+  if (key.startsWith('provider-')) { try { services = await T.providerList(); } catch { /* ignore */ } }
+  try { await loadGenres(); } catch { /* ignore */ }
+  const genre = genreByName(r.query.get('genre'));
+  const spec0 = rowSpec(key, services);
+  const spec = spec0 && genre ? { ...spec0, title: `${spec0.title} · ${genre.name}` } : spec0;
   const type = spec?.type || r.query.get('type') || 'all';
   const top = `<button class="icon-btn" data-a="back">‹ Back</button><h2>${esc(spec?.title || 'Browse')}</h2>`;
   if (!spec) return { top, body: '<div class="empty-note">That list is not available.</div>' };
@@ -667,7 +758,7 @@ async function renderBrowse(r) {
         if (busy || done) return;
         busy = true;
         try {
-          const { items, more: hasMore } = await loadRow(key, ++page, type);
+          const { items, more: hasMore } = await loadRow(key, ++page, type, genre);
           if (!grid.isConnected) return;
           const fresh = items.filter((t) => (type === 'all' || t.type === type) && !shown.has(`${t.type}:${t.id}`));
           fresh.forEach((t) => shown.add(`${t.type}:${t.id}`));
@@ -1064,32 +1155,36 @@ function updateWhere() {
 let whereProgress = null;
 Object.assign(actions, { 'where-refresh': () => { const w = whereStore(); for (const k of Object.keys(w.items)) w.items[k].t = 0; updateWhere(); redraw(); } });
 
-function renderServices() {
+// The services you picked under Me, as { key, name, logo }.
+const NONE_SVC = '__none';
+async function myServices() {
+  try { return (await T.selectedServices()).map((p) => ({ key: serviceKey(p.name), name: serviceKey(p.name), logo: p.logo })); } catch { return []; }
+}
+async function renderServices() {
   const top = '<h2>Services</h2><button class="icon-btn" data-a="where-refresh">↻ Refresh</button>';
   if (!store.getSettings().tmdbKey) return { top, body: errorBox(new T.MissingKeyError()) };
   updateWhere();
   const items = store.listItems();
-  const by = new Map();
-  for (const it of items) for (const k of whereOf(it)) { if (!by.has(k)) by.set(k, []); by.get(k).push(it); }
-  const svcs = whereServices();
-  const cards = [...by.entries()].filter(([k]) => svcs[k]).sort((a, b) => b[1].length - a[1].length || (svcs[a[0]].priority - svcs[b[0]].priority));
+  const mine = await myServices();
+  const keys = new Set(mine.map((m) => m.key));
+  const cards = mine.map((m) => [m.key, items.filter((it) => whereOf(it).includes(m.key)), m]);
+  const none = items.filter((it) => !whereOf(it).some((k) => keys.has(k)));
   const checking = whereProgress ? `<p class="muted-note" id="where-line">Checking where your titles stream… ${whereProgress.done} of ${whereProgress.total}</p>` : '';
-  if (!cards.length) return { top, body: checking || `<div class="empty-state"><p>None of the titles in your library are streaming in ${esc(whereStore().region)} right now, or they haven't been checked yet.</p></div>` };
-  const nowhere = items.filter((it) => whereStore().items[it.key] && !whereOf(it).length).length;
-  const body = `${checking}<p class="author" style="margin:0 0 10px">Where the titles in your library are streaming right now. Tap a service to see them.</p>
-    <div class="svc-cards">${cards.map(([k, list]) => {
-      const s = svcs[k];
+  const card = (k, list, s, href) => {
       const shows = list.filter((i) => i.type === 'tv').length;
       const watching = list.filter((i) => i.status === 'watching').length;
       const toWatch = list.filter((i) => i.status === 'watchlist').length;
       const mins = list.reduce((n, it) => n + (showProgress(it)?.mins || 0), 0);
-      return `<a class="svc-card" href="#/service/${encodeURIComponent(k)}">
-        <span class="svc-head">${s.logo ? `<img src="${esc(T.img(s.logo, 'w92'))}" alt="">` : ''}<span class="meta"><span class="title">${esc(s.name)}</span>
+      return `<a class="svc-card${k === NONE_SVC ? ' none-card' : ''}" href="${href}">
+        <span class="svc-head">${s.logo ? `<img src="${esc(T.img(s.logo, 'w92'))}" alt="">` : k === NONE_SVC ? '<span class="svc-none-icon" aria-hidden="true">?</span>' : ''}<span class="meta"><span class="title">${esc(s.name)}</span>
           <span class="author">${list.length} title${list.length === 1 ? '' : 's'} · ${shows} show${shows === 1 ? '' : 's'} · ${list.length - shows} movie${list.length - shows === 1 ? '' : 's'}</span></span><span class="chev" aria-hidden="true">›</span></span>
         <span class="svc-strip">${list.slice(0, 6).map((it) => cover(it, '', 'w154')).join('')}</span>
         <span class="svc-stats"><span><b>${watching}</b> watching</span><span><b>${toWatch}</b> to watch</span>${mins ? `<span><b>${fmtTime(mins)}</b> left</span>` : ''}</span></a>`;
-    }).join('')}</div>
-    ${nowhere ? `<p class="muted-note">${nowhere} title${nowhere === 1 ? ' isn’t' : 's aren’t'} streaming anywhere in ${esc(whereStore().region)} right now (rent or buy only).</p>` : ''}
+  };
+  const body = `${checking}<p class="author" style="margin:0 0 10px">The titles in your library on each service you have. Pick your services under <a href="#/me">Me</a>.</p>
+    ${mine.length ? '' : '<div class="empty-note">You haven\'t picked any services yet. Go to <a href="#/me">Me</a> and tap the ones you have.</div>'}
+    <div class="svc-cards">${cards.map(([k, list, s]) => card(k, list, s, `#/service/${encodeURIComponent(k)}`)).join('')}
+    ${none.length ? card(NONE_SVC, none, { name: 'No selected services' }, `#/service/${NONE_SVC}`) : ''}</div>
     <div class="srcnote">Streaming info from <a href="https://www.justwatch.com" target="_blank" rel="noopener">JustWatch</a> via TMDB · ${esc(whereStore().region)}</div>`;
   return { top, body };
 }
@@ -1174,6 +1269,13 @@ Object.assign(actions, {
   },
 });
 Object.assign(actions, {
+  'genre-toggle': (el) => {
+    const cur = new Set(store.getSettings().genres || []);
+    const n = el.dataset.v;
+    cur.has(n) ? cur.delete(n) : cur.add(n);
+    store.saveSettings({ genres: [...cur] });
+    el.setAttribute('aria-pressed', String(cur.has(n)));
+  },
   'edit-name': () => { editingName = true; redraw().then(() => $('#name')?.focus()); },
   'save-name': () => { store.saveSettings({ name: ($('#name')?.value || '').trim() }); editingName = false; redraw(); },
   svc: (el) => {
@@ -1227,6 +1329,7 @@ async function servicesHtml(s) {
 }
 
 async function renderMe() {
+  try { await loadGenres(); } catch { /* offline */ }
   const s = store.getSettings();
   if (s.googleClientId) sync.preload();
   const all = store.listItems();
@@ -1246,11 +1349,15 @@ async function renderMe() {
       <p class="author" style="margin:0">Auto follows your phone's light or dark mode.</p></div>
 
     <div class="card"><h3>Streaming services</h3>
-      <p class="author" style="margin:0 0 4px">Services you pick get their own row on Discover.</p>${await servicesHtml(s)}
+      <p class="author" style="margin:0 0 4px">Tap the services you have. Each gets a card on the Services tab and shows first on Discover.</p>${await servicesHtml(s)}
       <div class="gfield" style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px"><span>Region for streaming info<br><small class="author">Two-letter country code</small></span><input id="region" value="${esc(s.region)}" maxlength="2" aria-label="Region"></div></div>
 
     ${store.builtIn.tmdb ? '' : `<div class="card"><h3>TMDB key</h3><p class="author">Get one free at <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">themoviedb.org</a>. Saved only on this device.</p>
       <div class="name-edit"><input id="tmdbKey" type="password" value="${esc(s.tmdbKey)}" style="width:100%"><button class="text-btn" id="save-tmdb">Save</button></div></div>`}
+
+    <div class="card"><h3>Genres you like</h3>
+      <p class="author" style="margin:0 0 8px">Discover shows these as quick filters, Overview leans toward them, and your Library can filter by them.</p>
+      ${genreCat?.list?.length ? `<div class="chips">${genreCat.list.map((g) => `<button class="chip" data-a="genre-toggle" data-v="${esc(g.name)}" aria-pressed="${(s.genres || []).includes(g.name)}">${esc(g.name)}</button>`).join('')}</div>` : '<p class="author" style="margin:0">Genres load when you\'re online.</p>'}</div>
 
     <div class="card"><h3>Google Drive backup</h3>
       <p class="author">Your lists are saved on this device and backed up to a private app folder in your Google Drive, so they follow you between phone and PC.</p>
@@ -1316,7 +1423,7 @@ async function startup() {
     try { await sync.syncNow(); } catch (e) { console.warn('Sync failed', e); }
   } else if (sync.isSignedIn()) sync.preload();
   if (store.getSettings().tmdbKey) {
-    const needsInfo = store.listItems().some((i) => i.type === 'tv' && i.followed && store.getShowInfo(i.id)?.status === undefined);
+    const needsInfo = store.listItems().some((i) => i.type === 'tv' && i.followed && store.getShowInfo(i.id)?.genres === undefined);
     try { await checkUpdates({ force: needsInfo }); } catch (e) { console.warn('Update check failed', e); }
   }
 }
