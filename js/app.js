@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.7.0';
+const APP_VERSION = '0.7.1';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -307,7 +307,7 @@ function nextUp(it) {
 
 function renderHome() {
   const y = YEAR();
-  const top = `<h2>${y}</h2><button class="icon-btn" data-a="refresh">↻ Refresh</button>`;
+  const top = `<h2>Movie &amp; Show Tracker</h2><button class="icon-btn" data-a="refresh">↻ Refresh</button>`;
   const all = store.listItems();
   const hasKey = !!store.getSettings().tmdbKey;
   const homeRows = ['trending-tv', 'for-you', 'popular-tv', 'new-tv'];
@@ -344,13 +344,9 @@ function renderHome() {
   else {
     const left = watching.reduce((n, it) => n + (showProgress(it)?.left || 0), 0);
     const mins = watching.reduce((n, it) => n + (showProgress(it)?.mins || 0), 0);
-    body += `<button class="stack ${watchOpen ? 'open' : ''}" data-a="toggle-watching" aria-expanded="${watchOpen}">
-      <span class="fan">${watching.slice(0, 4).map((it, i) => cover(it, `--i:${i}`, 'w154')).join('')}</span>
-      <span class="meta"><span class="title">Watching ${watching.length} ${watching.length === 1 ? 'title' : 'titles'}</span>
-        <span class="author">${esc(watching.slice(0, 3).map((i) => i.title).join(', '))}${watching.length > 3 ? ` and ${watching.length - 3} more` : ''}</span>
-        ${left ? `<span class="series">${left} episodes left to watch${mins ? ` · ${fmtTime(mins)}` : ''}</span>` : ''}
-        <span class="hint">${watchOpen ? 'Tap to close' : 'Tap to see each one'}</span></span>
-      <span class="chev" aria-hidden="true">›</span></button>`;
+    body += `<button class="stack ${watchOpen ? 'open' : ''}" data-a="toggle-watching" aria-expanded="${watchOpen}" aria-label="Watching ${watching.length}. ${watchOpen ? 'Tap to close' : 'Tap to see each one'}">
+      <span class="spread">${watching.slice(0, 8).map((it) => cover(it, '', 'w154')).join('')}</span>
+      <span class="stack-foot"><b>Watching ${watching.length}</b>${left ? `<span>${left} episodes left${mins ? ` · ${fmtTime(mins)}` : ''}</span>` : ''}<span class="chev" aria-hidden="true">›</span></span></button>`;
     if (watchOpen) body += `<div class="stack-list">${watching.map((it) => `<a class="now" href="#/title/${it.type}/${it.id}">${cover(it)}<div class="meta">
       <span class="title">${esc(it.title)}</span><span class="author">${esc(typeTxt(it))}${runTag(it)}</span>
       ${nextUp(it) ? `<span class="series">${esc(nextUp(it))}</span>` : ''}${progressHtml(it)}
@@ -1274,5 +1270,9 @@ document.addEventListener('visibilitychange', () => {
 });
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW failed', e)));
+  // When a new version takes over, reload once so the new screens show up right away.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded) { reloaded = true; location.reload(); } });
 }
 startup();

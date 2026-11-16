@@ -334,3 +334,12 @@ section[data-home-row] .section-h{margin-top:18px}
 .svc-stats{display:flex;gap:14px;font-size:12px;color:var(--muted)}
 .svc-stats b{color:var(--ink);font-variant-numeric:tabular-nums}
 .h-logo{width:26px;height:26px;border-radius:6px;vertical-align:-4px;margin-right:8px}
+
+/* Watching card: posters spread across the card */
+.stack{flex-direction:column;align-items:stretch;gap:10px}
+.stack .spread{display:flex;gap:6px}
+.stack .spread .cover{flex:1 1 0;min-width:0;height:auto;aspect-ratio:2/3;padding:0;box-shadow:0 2px 6px rgba(0,0,0,.25)}
+.stack .spread .cover b,.stack .spread .cover i,.stack .spread .cover .check{display:none}
+.stack-foot{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--muted)}
+.stack-foot b{font:700 15px var(--display);color:var(--ink)}
+.stack-foot span:not(.chev){flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}
