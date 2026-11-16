@@ -145,9 +145,27 @@ export const KNOWN_SERVICES = [
 
 const normName = (n) => String(n).toLowerCase().replace(/\+/g, ' plus').replace(/[^a-z0-9]/g, '');
 
+// TMDB lists the same service many times: "Paramount+ Amazon Channel", "Paramount Plus Apple TV Channel",
+// "Paramount+ with Showtime", "Paramount Plus Essential", "Netflix Standard with Ads"... This is the main name.
+export function baseServiceName(name) {
+  let n = String(name).replace(/\s+/g, ' ').trim();
+  const strip = (re) => { const x = n.replace(re, '').trim(); if (x) n = x; };
+  strip(/\s+(via\s+)?(amazon|apple tv|roku premium|roku|youtube|prime video|amazon prime video)\s+channels?$/i);
+  strip(/\s+apple tv$/i);
+  strip(/\s*(basic|standard|essential|premium|premium plus|ad[- ]supported)?\s+with\s+(ads|showtime)$/i);
+  strip(/\s+(essential|premium plus|premium|ad[- ]free|ad[- ]supported|basic|standard)$/i);
+  return n;
+}
+const knownAlias = new Map(KNOWN_SERVICES.flatMap((k) => k.names.map((n) => [normName(n), k.names[0]])));
+// One key per service, so all of a service's variants count as that service.
+export function serviceKey(name) {
+  const base = baseServiceName(name);
+  return normName(knownAlias.get(normName(name)) || knownAlias.get(normName(base)) || base);
+}
+
 // For each known service, the matching provider from TMDB's list (or null).
 export function matchKnown(list) {
-  const byName = new Map(list.map((p) => [normName(p.name), p]));
+  const byName = new Map(list.flatMap((p) => (p.names || [p.name]).map((n) => [normName(n), p])));
   return KNOWN_SERVICES.map((k) => ({ ...k, provider: k.names.map((n) => byName.get(normName(n))).find(Boolean) || null }));
 }
 
@@ -156,14 +174,15 @@ export async function selectedServices() {
   const { services } = getSettings();
   const list = await providerList();
   if (Array.isArray(services)) {
-    const byId = new Map(list.map((p) => [p.id, p]));
-    return services.map((id) => byId.get(id)).filter(Boolean);
+    // Saved ids may be any variant of a service (older versions listed them all).
+    const byId = new Map(list.flatMap((p) => (p.ids || [p.id]).map((id) => [id, p])));
+    return [...new Set(services.map((id) => byId.get(id)).filter(Boolean))];
   }
   return matchKnown(list).filter((k) => k.row && k.provider).map((k) => k.provider);
 }
 
 let providerListCache = null;
-const PROVIDERS_KEY = (region) => `wt.providers.${region}`;
+const PROVIDERS_KEY = (region) => `wt.providers2.${region}`;
 export async function providerList() {
   if (providerListCache) return providerListCache;
   const { region } = getSettings();
@@ -187,7 +206,20 @@ export async function providerList() {
     const prev = map.get(p.provider_id);
     if (!prev || prio < prev.priority) map.set(p.provider_id, { id: p.provider_id, name: p.provider_name, logo: p.logo_path, priority: prio });
   }
-  providerListCache = [...map.values()].sort((a, b) => a.priority - b.priority);
+  // Merge each service's variants into one entry: { id: main id, ids: every variant's id, name, names, logo, priority }.
+  const groups = new Map();
+  for (const p of [...map.values()].sort((a, b) => a.priority - b.priority)) {
+    const k = serviceKey(p.name);
+    const g = groups.get(k);
+    if (!g) { groups.set(k, { ...p, ids: [p.id], names: [p.name], main: p }); continue; }
+    g.ids.push(p.id); g.names.push(p.name);
+    g.priority = Math.min(g.priority, p.priority);
+    // The plainest name is the main one ("Paramount Plus", not "Paramount+ Amazon Channel").
+    const plain = (x) => (baseServiceName(x.name) === x.name.trim() ? 0 : 1) * 1000 + x.name.length;
+    if (plain(p) < plain(g.main)) g.main = p;
+  }
+  providerListCache = [...groups.values()].map(({ main, ...g }) => ({ ...g, id: main.id, name: baseServiceName(main.name), logo: main.logo }))
+    .sort((a, b) => a.priority - b.priority);
   try { localStorage.setItem(PROVIDERS_KEY(region), JSON.stringify(providerListCache)); } catch { /* ignore */ }
   return providerListCache;
 }

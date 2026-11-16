@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.8.1';
+const APP_VERSION = '0.8.2';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -195,9 +195,9 @@ const TABS = [
   { id: 'alerts', label: 'Alerts', icon: ICONS.alerts },
   { id: 'me', label: 'Me', icon: ICONS.more },
 ];
-const SCREENS = { home: renderHome, library: renderLibrary, discover: renderDiscover, alerts: renderAlerts, me: renderMe, about: renderAbout, title: renderTitle, season: renderSeason, browse: renderBrowse, mylists: renderMyLists, lists: renderLists, list: renderLibrary, services: renderServices, service: renderLibrary };
+const SCREENS = { home: renderHome, library: renderLibrary, discover: renderDiscover, alerts: renderAlerts, me: renderMe, about: renderAbout, title: renderTitle, season: renderSeason, browse: renderBrowse, mylists: renderMyLists, lists: renderLists, list: renderLibrary, services: renderServices, service: renderLibrary, pickservices: renderPickServices };
 const ALIASES = { updates: 'alerts', settings: 'me', search: 'discover', calendar: 'alerts' };
-const TAB_OF = { about: 'me', title: null, season: null, browse: 'discover', mylists: 'lists', list: 'lists', library: 'lists', service: 'services' };
+const TAB_OF = { about: 'me', title: null, season: null, browse: 'discover', mylists: 'lists', list: 'lists', library: 'lists', service: 'services', pickservices: 'me' };
 let current = { name: 'home', args: [], query: new URLSearchParams() };
 let activeTab = 'home';
 
@@ -490,7 +490,7 @@ function whereLine(it) {
   if (!w) return '<span class="where-line">Not checked yet</span>';
   const svcs = whereServices();
   if (!w.s.length) return '<span class="where-line">Not streaming right now (rent or buy only)</span>';
-  return `<span class="where-line">On ${w.s.map((k) => `<span class="where-chip">${svcs[k]?.logo ? `<img src="${esc(T.img(svcs[k].logo, 'w92'))}" alt="">` : ''}${esc(k)}</span>`).join('')}</span>`;
+  return `<span class="where-line">On ${w.s.map((k) => `<span class="where-chip">${svcs[k]?.logo ? `<img src="${esc(T.img(svcs[k].logo, 'w92'))}" alt="">` : ''}${esc(svcs[k]?.name || k)}</span>`).join('')}</span>`;
 }
 // Percent of the series watched, shown on the right of a show card.
 function pctHtml(it) {
@@ -685,7 +685,7 @@ function rowSpec(key, services = []) {
   const m = key.match(/^provider-(\d+)$/);
   if (m) {
     const p = services.find((x) => x.id === Number(m[1]));
-    return { title: p?.name || 'Streaming service', logo: p?.logo, provider: Number(m[1]) };
+    return { title: p?.name || 'Streaming service', logo: p?.logo, provider: (p?.ids || [Number(m[1])]).join('|') };
   }
   return null;
 }
@@ -795,6 +795,10 @@ async function renderTitle(r) {
   const region = store.getSettings().region;
   const wp = d['watch/providers']?.results?.[region];
   saveWhere(type, id, wp);
+  if (wp) for (const k of ['flatrate', 'free', 'ads', 'rent', 'buy']) {
+    const seen = new Set();
+    if (wp[k]) wp[k] = wp[k].filter((p) => { const key = T.serviceKey(p.provider_name); return !seen.has(key) && seen.add(key); });
+  }
   const groups = [['flatrate', 'Stream'], ['free', 'Free'], ['ads', 'Free with ads'], ['rent', 'Rent'], ['buy', 'Buy']]
     .filter(([k]) => wp?.[k]?.length)
     .map(([k, label]) => `<div class="pgroup"><small>${label}</small><div class="providers">${wp[k].map((p) => `<a href="${esc(watchUrl(p.provider_name, t.title, wp.link))}" target="_blank" rel="noopener" title="Open in ${esc(p.provider_name)}"><img src="${esc(T.img(p.logo_path, 'w92'))}" alt="${esc(p.provider_name)}"></a>`).join('')}</div></div>`).join('');
@@ -1113,14 +1117,27 @@ function watchUrl(provider, title, fallback) {
 const WHERE_KEY = 'wt.where';
 const WHERE_DAYS = 7;
 let whereData = (() => { try { return JSON.parse(localStorage.getItem(WHERE_KEY) || 'null'); } catch { return null; } })();
+// v0.8.2: re-key saved services so variants ("Paramount+ with Showtime") count as the main service.
+if (whereData && whereData.v !== 2) {
+  try {
+    const old = whereData.services || {};
+    const svcs = {};
+    for (const [k, v] of Object.entries(old)) {
+      const nk = T.serviceKey(v.name || k);
+      if (!svcs[nk] || (v.priority ?? 999) < (svcs[nk].priority ?? 999)) svcs[nk] = { ...v, name: T.baseServiceName(v.name || k) };
+    }
+    for (const it of Object.values(whereData.items || {})) it.s = [...new Set((it.s || []).map((k) => T.serviceKey(old[k]?.name || k)))];
+    whereData.services = svcs; whereData.v = 2;
+  } catch { whereData = null; }
+}
 function whereStore() {
   const region = store.getSettings().region;
-  if (!whereData || whereData.region !== region) whereData = { region, items: {}, services: {} };
+  if (!whereData || whereData.region !== region) whereData = { v: 2, region, items: {}, services: {} };
   return whereData;
 }
 const saveWhereStore = () => { try { localStorage.setItem(WHERE_KEY, JSON.stringify(whereData)); } catch { /* ignore */ } };
 // "Netflix Standard with Ads" and "Paramount+ Amazon Channel" count as Netflix and Paramount+.
-const serviceKey = (name) => String(name).replace(/\s+(standard|basic)?\s*with ads$/i, '').replace(/\s+(amazon|apple tv|roku premium)\s+channel$/i, '').replace(/\s+premium$/i, '').trim();
+const serviceKey = T.serviceKey;
 function saveWhere(type, id, wp, { persist = true } = {}) {
   const w = whereStore();
   const names = new Map();
@@ -1128,7 +1145,8 @@ function saveWhere(type, id, wp, { persist = true } = {}) {
     const key = serviceKey(p.provider_name);
     if (!names.has(key)) names.set(key, p);
     const prev = w.services[key];
-    if (!prev || (p.display_priority ?? 999) < (prev.priority ?? 999)) w.services[key] = { name: key, logo: p.logo_path, priority: p.display_priority ?? 999 };
+    const plain = T.baseServiceName(p.provider_name) === p.provider_name.trim();
+    if (!prev || (plain && !prev.plain) || (plain === !!prev.plain && (p.display_priority ?? 999) < (prev.priority ?? 999))) w.services[key] = { name: T.baseServiceName(p.provider_name), logo: p.logo_path, priority: p.display_priority ?? 999, plain };
   }
   w.items[`${type}:${id}`] = { t: Date.now(), s: [...names.keys()] };
   if (persist) saveWhereStore();
@@ -1160,7 +1178,7 @@ Object.assign(actions, { 'where-refresh': () => { const w = whereStore(); for (c
 // The services you picked under Me, as { key, name, logo }.
 const NONE_SVC = '__none';
 async function myServices() {
-  try { return (await T.selectedServices()).map((p) => ({ key: serviceKey(p.name), name: serviceKey(p.name), logo: p.logo })); } catch { return []; }
+  try { return (await T.selectedServices()).map((p) => ({ key: serviceKey(p.name), name: p.name, logo: p.logo })); } catch { return []; }
 }
 async function renderServices() {
   const top = '<h2>Services</h2><button class="icon-btn" data-a="where-refresh">↻ Refresh</button>';
@@ -1307,14 +1325,15 @@ Object.assign(actions, {
   },
   'edit-name': () => { editingName = true; redraw().then(() => $('#name')?.focus()); },
   'save-name': () => { store.saveSettings({ name: ($('#name')?.value || '').trim() }); editingName = false; redraw(); },
-  svc: (el) => {
+  svc: async (el) => {
     const id = Number(el.dataset.id);
-    const ids = $$('.pin-grid button[aria-pressed="true"]').map((b) => Number(b.dataset.id));
-    const on = el.getAttribute('aria-pressed') === 'true';
+    let ids = [];
+    try { ids = (await T.selectedServices()).map((p) => p.id); } catch { /* offline */ }
+    const on = ids.includes(id);
     const next = on ? ids.filter((x) => x !== id) : [...ids, id];
     store.saveSettings({ services: next });
-    el.setAttribute('aria-pressed', String(!on));
-    const n = $('#svc-count'); if (n) n.textContent = `${next.length} on Discover`;
+    $$(`.pin-grid button[data-id="${id}"]`).forEach((b) => b.setAttribute('aria-pressed', String(!on)));
+    $$('.svc-count').forEach((n) => { n.textContent = svcCount(next.length); });
   },
   'sign-in': async () => { try { await sync.signIn(); await sync.syncNow(); toast('Signed in. Your lists are backed up.'); } catch (e) { toast(e.message, 4000); } redraw(); },
   'sync-now': async () => { try { await sync.syncNow({ interactive: true }); toast('Synced'); } catch (e) { toast(e.message, 4000); } redraw(); },
@@ -1341,20 +1360,51 @@ function syncLine(st) {
   return when + '.';
 }
 
+const svcCount = (n) => (n ? `${n} selected` : 'None selected yet');
+const svcBtn = (p, on) => `<button data-a="svc" data-id="${p.id}" data-name="${esc([p.name, ...(p.names || [])].join(' ').toLowerCase())}" aria-pressed="${on}"><img src="${esc(T.img(p.logo, 'w92'))}" alt="" loading="lazy">${esc(p.name)}</button>`;
+// Every service TMDB lists for your region, popular ones first, one entry per service.
+async function allServices() {
+  const list = await T.providerList();
+  const known = T.matchKnown(list).filter((k) => k.provider);
+  const knownIds = new Set(known.map((k) => k.provider.id));
+  return { list, known, ordered: [...known.map((k) => k.provider), ...list.filter((p) => !knownIds.has(p.id))] };
+}
+// Me: the services you've picked plus the popular ones, with a link to the full list.
 async function servicesHtml(s) {
   if (!s.tmdbKey) return '<p class="author">Add a TMDB key first.</p>';
   try {
-    const list = await T.providerList();
-    const known = T.matchKnown(list);
-    const knownIds = new Set(known.filter((k) => k.provider).map((k) => k.provider.id));
-    const ordered = [...known.filter((k) => k.provider).map((k) => k.provider), ...list.filter((p) => !knownIds.has(p.id))];
-    const selected = new Set((await T.selectedServices()).map((p) => p.id));
-    const missing = known.filter((k) => k.row && !k.provider).map((k) => k.names[0]);
-    return `<span class="author" id="svc-count">${selected.size} on Discover</span>
-      <label class="search" style="margin:8px 0 0">${ICONS.search}<input type="search" id="svc-filter" placeholder="Filter services" aria-label="Filter services"></label>
-      <div class="pin-grid">${ordered.map((p) => `<button data-a="svc" data-id="${p.id}" data-name="${esc(p.name.toLowerCase())}" aria-pressed="${selected.has(p.id)}"><img src="${esc(T.img(p.logo, 'w92'))}" alt="" loading="lazy">${esc(p.name)}</button>`).join('')}</div>
-      ${missing.length ? `<p class="muted-note" style="margin-bottom:0">Not listed by TMDB for ${esc(s.region)} right now: ${esc(missing.join(', '))}.</p>` : ''}`;
+    const { ordered, known } = await allServices();
+    const selected = await T.selectedServices();
+    const selIds = new Set(selected.map((p) => p.id));
+    const top = [...selected, ...known.filter((k) => k.row).map((k) => k.provider).filter((p) => !selIds.has(p.id))];
+    return `<span class="author svc-count">${svcCount(selected.length)}</span>
+      <div class="pin-grid top">${top.map((p) => svcBtn(p, selIds.has(p.id))).join('')}</div>
+      <a class="link-row" href="#/pickservices" style="padding-bottom:0">More services <span class="author" style="font-weight:500">${ordered.length} in all ›</span></a>`;
   } catch (e) { return errorBox(e); }
+}
+// The full list, on its own screen.
+async function renderPickServices() {
+  const top = '<button class="icon-btn" data-a="back">‹ Back</button><h2>Streaming services</h2>';
+  const s = store.getSettings();
+  if (!s.tmdbKey) return { top, body: errorBox(new T.MissingKeyError()) };
+  let ordered, selIds;
+  try { ({ ordered } = await allServices()); selIds = new Set((await T.selectedServices()).map((p) => p.id)); } catch (e) { return { top, body: errorBox(e) }; }
+  const body = `<p class="author" style="margin:0 0 6px">Tap the services you have. Each gets a card on the Services tab and shows first on Discover. Showing what's available in ${esc(s.region)}.</p>
+    <span class="author svc-count">${svcCount(selIds.size)}</span>
+    <label class="search" style="margin:8px 0 0">${ICONS.search}<input type="search" id="svc-filter" placeholder="Search services" aria-label="Search services"></label>
+    <div class="pin-grid all">${ordered.map((p) => svcBtn(p, selIds.has(p.id))).join('')}</div>
+    <p class="muted-note" id="svc-none" hidden>No service by that name.</p>`;
+  return {
+    top, body,
+    after: () => {
+      $('#svc-filter')?.addEventListener('input', (e) => {
+        const q = e.target.value.trim().toLowerCase();
+        let n = 0;
+        $$('.pin-grid button').forEach((b) => { b.hidden = !!q && !b.dataset.name.includes(q); if (!b.hidden) n++; });
+        $id('svc-none').hidden = n > 0;
+      });
+    },
+  };
 }
 
 async function renderMe() {
@@ -1415,7 +1465,6 @@ async function renderMe() {
     after: () => {
       $('#name')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') actions['save-name'](); });
       $('#region').addEventListener('change', (e) => { store.saveSettings({ region: e.target.value.trim().toUpperCase() || 'US' }); T.clearProviderCache(); toast('Region saved'); redraw(); });
-      $('#svc-filter')?.addEventListener('input', (e) => { const q = e.target.value.trim().toLowerCase(); $$('.pin-grid button').forEach((b) => { b.hidden = !!q && !b.dataset.name.includes(q); }); });
       $('#save-tmdb')?.addEventListener('click', () => { store.saveSettings({ tmdbKey: $('#tmdbKey').value.trim() }); T.clearProviderCache(); toast('Saved'); redraw(); });
       $('#save-gcid')?.addEventListener('click', () => { store.saveSettings({ googleClientId: $('#gcid').value.trim() }); toast('Saved'); redraw(); });
     },
