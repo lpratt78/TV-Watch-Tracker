@@ -1,6 +1,6 @@
 // Builds the in-app Updates feed: new seasons, premiere dates, new episodes, and
 // movie releases for titles in My Lists. Runs when the app opens (throttled).
-import { listItems, getLibrary, getUpdatesCache, setUpdatesCache } from './store.js';
+import { listItems, getLibrary, getUpdatesCache, setUpdatesCache, saveShowInfo } from './store.js';
 import { tvLite, movieLite, MissingKeyError } from './tmdb.js';
 
 const CHECK_EVERY_MS = 3 * 60 * 60 * 1000; // 3 hours
@@ -93,6 +93,7 @@ export function checkUpdates({ force = false } = {}) {
 
     await pool(shows, 4, async (item) => {
       const show = await tvLite(item.id, { fresh: true });
+      saveShowInfo(show);
       entries.push(...tvEntries(item, show));
     }).then((r) => { failures += r.filter((x) => x?.error).length; if (r.some((x) => x?.error instanceof MissingKeyError)) throw new MissingKeyError(); });
 

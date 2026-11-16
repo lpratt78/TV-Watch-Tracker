@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.3.0';
+const APP_VERSION = '0.4.0';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -61,6 +61,36 @@ function cover(t, style = '', size = 'w342') {
 const stars = (r) => `<span class="stars-row" aria-label="${r} of 5 stars">${[1, 2, 3, 4, 5].map((i) => `<span class="star ${r >= i ? 'on' : ''}">★</span>`).join('')}</span>`;
 const statusTag = (s) => `<span class="status"><span class="dot" style="background:${STATUS[s].color}"></span>${STATUS[s].name}</span>`;
 
+// Episode progress for a show in the library.
+// seen/aired count the whole series; season is the one you're on now.
+const realEps = (it) => (it?.eps || []).filter((c) => !c.startsWith('0x'));
+function showProgress(it) {
+  if (!it || it.type !== 'tv') return null;
+  const info = store.getShowInfo(it.id);
+  const eps = realEps(it);
+  const allDone = it.status === 'watched' && !eps.length; // marked Watched without episode detail
+  const aired = info?.aired || it.progress?.aired || 0;
+  let seen = allDone ? aired : eps.length || (it.progress?.seen ?? 0);
+  if (aired) seen = Math.min(seen, aired);
+  let season = null;
+  if (info) {
+    const nums = Object.keys(info.seasons).map(Number).filter((n) => info.seasons[n].aired).sort((a, b) => a - b);
+    const per = (n) => (allDone ? info.seasons[n].aired : Math.min(eps.filter((c) => c.startsWith(`${n}x`)).length, info.seasons[n].aired));
+    const n = nums.find((x) => per(x) < info.seasons[x].aired) ?? nums[nums.length - 1];
+    if (n) season = { n, seen: per(n), aired: info.seasons[n].aired };
+  }
+  if (!aired) return season ? { seen, aired, left: 0, season } : null;
+  return { seen, aired, left: Math.max(0, aired - seen), season };
+}
+const bar = (a, b) => `<span class="prog" role="progressbar" aria-valuemin="0" aria-valuemax="${b}" aria-valuenow="${a}"><span style="width:${b ? Math.round((a / b) * 100) : 0}%"></span></span>`;
+function progressHtml(it) {
+  const p = showProgress(it);
+  if (!p || !p.aired) return '';
+  return `<div class="progress">${p.season ? `<div class="prog-line"><span>Season ${p.season.n}</span><span>${p.season.seen} of ${p.season.aired}</span></div>${bar(p.season.seen, p.season.aired)}` : bar(p.seen, p.aired)}
+    <div class="prog-sub">${p.seen} of ${p.aired} episodes watched · ${p.left ? `${p.left} left` : 'all caught up'}</div></div>`;
+}
+const CHECK_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 8.4l2.6 2.6L12 5.4" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
 // Updates feed entries for one title (used for the little indicator pills).
 function entriesFor(type, id) {
   return store.getUpdatesCache().entries.filter((e) => e.itemType === type && e.id === id);
@@ -99,9 +129,9 @@ const TABS = [
   { id: 'alerts', label: 'Alerts', icon: ICONS.alerts },
   { id: 'me', label: 'Me', icon: ICONS.more },
 ];
-const SCREENS = { home: renderHome, library: renderLibrary, discover: renderDiscover, alerts: renderAlerts, me: renderMe, about: renderAbout, title: renderTitle };
+const SCREENS = { home: renderHome, library: renderLibrary, discover: renderDiscover, alerts: renderAlerts, me: renderMe, about: renderAbout, title: renderTitle, season: renderSeason, browse: renderBrowse, mylists: renderMyLists };
 const ALIASES = { lists: 'library', updates: 'alerts', settings: 'me', search: 'discover', calendar: 'alerts' };
-const TAB_OF = { about: 'me', title: null };
+const TAB_OF = { about: 'me', title: null, season: null, browse: 'discover', mylists: 'library' };
 let current = { name: 'home', args: [], query: new URLSearchParams() };
 let activeTab = 'home';
 
@@ -130,7 +160,7 @@ async function route() {
   if (current.name in TAB_OF) { if (TAB_OF[current.name]) activeTab = TAB_OF[current.name]; } else activeTab = current.name;
   renderNav();
   await draw();
-  bodyEl.scrollTop = current.name === 'title' ? 0 : (scrollOf[location.hash] || 0);
+  bodyEl.scrollTop = ['title', 'season', 'browse'].includes(current.name) ? 0 : (scrollOf[location.hash] || 0);
 }
 let drawSeq = 0;
 async function draw() {
@@ -197,35 +227,73 @@ const currentTheme = () => { try { return localStorage.getItem('wt.theme') || 'a
 function countdown(d) {
   return `<div class="cd">${d === null ? '<span>TBA</span>' : d <= 0 ? '<b>Today</b>' : `<b>${d}</b><span>${d === 1 ? 'day' : 'days'}</span>`}</div>`;
 }
+let watchOpen = false;
+Object.assign(actions, { 'toggle-watching': () => { watchOpen = !watchOpen; redraw(); } });
+
+// What's next for a show you're watching: episodes left, or the next one coming.
+function nextUp(it) {
+  const p = showProgress(it);
+  const soon = entriesFor(it.type, it.id).find((x) => x.upcoming);
+  if (soon) return `Next: ${soon.what} · ${soon.date ? inDays(soon.date) : 'date TBA'}`;
+  if (p?.aired) return '';
+  return `Started ${new Date(it.startedAt || it.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+}
+
 function renderHome() {
   const y = YEAR();
   const top = `<h2>${y}</h2><button class="icon-btn" data-a="refresh">↻ Refresh</button>`;
   const all = store.listItems();
+  const hasKey = !!store.getSettings().tmdbKey;
+  const homeRows = ['trending-tv', 'for-you', 'popular-tv', 'new-tv'];
+  const rowsHtml = hasKey ? homeRows.map((k) => `<section data-home-row="${k}"><div class="section-h"><span>${esc(rowSpec(k).title)}</span><a href="#/browse/${k}">See all ›</a></div><div class="shelf-scroll">${skeletonRow()}</div></section>`).join('') : '';
+  const loadRows = () => {
+    const io = new IntersectionObserver((ents) => {
+      for (const en of ents) {
+        if (!en.isIntersecting) continue;
+        io.unobserve(en.target);
+        const sc = en.target.querySelector('.shelf-scroll');
+        loadRow(en.target.dataset.homeRow, 1, 'tv').then(({ items }) => {
+          const list = notInLibrary(items).filter((t) => t.type === 'tv').slice(0, 20);
+          sc.innerHTML = list.length ? list.map(sugCard).join('') : '<p class="author">Nothing new here right now.</p>';
+        }).catch((e) => { sc.outerHTML = errorBox(e); });
+      }
+    }, { root: bodyEl, rootMargin: '400px 0px' });
+    $$('[data-home-row]').forEach((el) => io.observe(el));
+  };
+
   if (!all.length) {
     return { top, body: `<div class="empty-state"><h3>Welcome${store.getSettings().name ? `, ${esc(store.getSettings().name)}` : ''}</h3>
       <p>Your library is empty. Find movies and shows to add to your Watchlist, and they'll show up here with countdowns to new seasons and releases.</p>
-      <a class="primary" href="#/discover">Find something to watch</a></div>` };
+      <a class="primary" href="#/discover">Find something to watch</a></div>${rowsHtml}`, after: loadRows };
   }
   const watching = store.listItems('watching');
   const watchlist = store.listItems('watchlist');
   const watchedYear = store.listItems('watched').filter((i) => new Date(i.watchedAt || i.updatedAt).getFullYear() === y);
   const rated = all.filter((i) => i.rating);
   const avg = rated.length ? (rated.reduce((s, i) => s + i.rating, 0) / rated.length).toFixed(1) : null;
-  const upcoming = store.getUpdatesCache().entries.filter((e) => e.upcoming).slice(0, 4);
+  const upcoming = store.getUpdatesCache().entries.filter((e) => e.upcoming);
 
+  // Watching now: one stacked card that opens into a card per title.
   let body = '<div class="section-h">Watching now</div>';
-  body += watching.length ? watching.map((it) => {
-    const next = entriesFor(it.type, it.id).find((e) => e.upcoming) || entriesFor(it.type, it.id)[0];
-    return `<a class="now" href="#/title/${it.type}/${it.id}">${cover(it)}<div class="meta">
+  if (!watching.length) body += '<p class="author">Nothing on Watching right now. Open a show and set it to Watching to start.</p>';
+  else {
+    const left = watching.reduce((n, it) => n + (showProgress(it)?.left || 0), 0);
+    body += `<button class="stack ${watchOpen ? 'open' : ''}" data-a="toggle-watching" aria-expanded="${watchOpen}">
+      <span class="fan">${watching.slice(0, 4).map((it, i) => cover(it, `--i:${i}`, 'w154')).join('')}</span>
+      <span class="meta"><span class="title">Watching ${watching.length} ${watching.length === 1 ? 'title' : 'titles'}</span>
+        <span class="author">${esc(watching.slice(0, 3).map((i) => i.title).join(', '))}${watching.length > 3 ? ` and ${watching.length - 3} more` : ''}</span>
+        ${left ? `<span class="series">${left} episodes left to watch</span>` : ''}
+        <span class="hint">${watchOpen ? 'Tap to close' : 'Tap to see each one'}</span></span>
+      <span class="chev" aria-hidden="true">›</span></button>`;
+    if (watchOpen) body += `<div class="stack-list">${watching.map((it) => `<a class="now" href="#/title/${it.type}/${it.id}">${cover(it)}<div class="meta">
       <span class="title">${esc(it.title)}</span><span class="author">${esc(typeTxt(it))}</span>
-      ${next ? `<span class="series">${esc(next.what)} · ${esc(next.date ? inDays(next.date) : 'date TBA')}</span>` : `<span class="series">Started ${new Date(it.startedAt || it.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>`}
-      ${it.rating ? stars(it.rating) : ''}</div></a>`;
-  }).join('') : '<p class="author">Nothing on Watching right now. Open a show and set it to Watching to start.</p>';
+      ${nextUp(it) ? `<span class="series">${esc(nextUp(it))}</span>` : ''}${progressHtml(it)}
+      ${it.rating ? stars(it.rating) : ''}</div></a>`).join('')}</div>`;
+  }
 
   body += '<div class="section-h">Coming up <a href="#/alerts">Alerts ›</a></div>';
-  body += upcoming.length ? upcoming.map((e) => `<a class="book-row" href="#/title/${e.itemType}/${e.id}" style="padding:8px 0">${cover({ title: e.title, poster: e.poster, type: e.itemType, id: e.id }, 'width:40px;height:60px;padding:0', 'w154')}
-      <div class="meta"><span class="title">${esc(e.title)}</span><span class="author">${esc(e.what)} · ${esc(fmtDate(e.date))}</span></div>
-      ${countdown(daysUntil(e.date))}</a>`).join('')
+  body += upcoming.length ? `<div class="auto-scroll" id="coming"><div class="track">${upcoming.map((e) => `<a class="up-card" href="#/title/${e.itemType}/${e.id}">${cover({ title: e.title, poster: e.poster, type: e.itemType, id: e.id }, '', 'w154')}
+      <span class="meta"><span class="title">${esc(e.title)}</span><span class="author">${esc(e.what)}</span><span class="series">${esc(fmtDate(e.date))}</span></span>${countdown(daysUntil(e.date))}</a>`).join('')}</div></div>`
     : '<p class="author">No premieres or release dates coming up for your titles yet. The app checks every time it opens.</p>';
 
   body += `<div class="section-h">${y} so far</div><div class="sum">
@@ -237,12 +305,40 @@ function renderHome() {
   if (watchlist.length) {
     body += '<div class="section-h">Up next <a href="#/library">Library ›</a></div>' + watchlist.slice(0, 3).map((it) => `<a class="book-row" href="#/title/${it.type}/${it.id}" style="border-bottom:0;padding-top:4px">${cover(it, 'width:40px;height:60px;padding:0', 'w154')}<div class="meta"><span class="title">${esc(it.title)}</span><span class="series">${esc(typeTxt(it))}</span></div></a>`).join('');
   }
-  body += '<a class="link-row" href="#/alerts">All alerts <span>›</span></a>';
-  return { top, body };
+  body += rowsHtml;
+  return { top, body, after: () => { autoScroll($('#coming')); loadRows(); } };
+}
+
+// Slowly scroll a row sideways on its own, looping. Pauses while you touch it.
+function autoScroll(el) {
+  if (!el || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const track = el.querySelector('.track');
+  if (track.scrollWidth <= el.clientWidth + 4) return;
+  track.insertAdjacentHTML('beforeend', track.innerHTML.replace(/<a /g, '<a aria-hidden="true" tabindex="-1" '));
+  const half = track.scrollWidth / 2;
+  let pos = el.scrollLeft, pausedUntil = 0, last = performance.now();
+  const pause = () => { pausedUntil = performance.now() + 4000; };
+  ['pointerdown', 'touchstart', 'wheel', 'focusin'].forEach((ev) => el.addEventListener(ev, pause, { passive: true }));
+  const step = (now) => {
+    if (!el.isConnected) return;
+    const dt = Math.min(64, now - last); last = now;
+    if (now >= pausedUntil && document.visibilityState === 'visible') {
+      pos += dt * 0.03;
+      if (pos >= half) pos -= half;
+      el.scrollLeft = pos;
+    } else {
+      if (el.scrollLeft >= half) el.scrollLeft -= half;
+      pos = el.scrollLeft;
+    }
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
 }
 
 // ---------- Library ----------
 const libState = (() => { const d = { shelf: 'all', type: 'all', sort: 'recent', view: 'list', list: '' }; try { return { ...d, ...JSON.parse(localStorage.getItem('wt.libView') || '{}') }; } catch { return d; } })();
+// Library opens on Shows each time the app starts; the other choices stay one tap away.
+libState.type = 'tv';
 const saveLib = () => { try { localStorage.setItem('wt.libView', JSON.stringify(libState)); } catch { /* ignore */ } };
 Object.assign(actions, {
   shelf: (el) => { libState.shelf = el.dataset.v; saveLib(); redraw(); },
@@ -254,6 +350,7 @@ function libRow(it) {
   return `<a class="book-row" href="#/title/${it.type}/${it.id}">${cover(it, '', 'w154')}<div class="meta">
     <span class="title">${esc(it.title)}</span><span class="author">${esc(typeTxt(it))}</span>
     ${it.rating ? stars(it.rating) : ''}
+    ${it.type === 'tv' && it.status !== 'watchlist' ? progressHtml(it) : ''}
     ${it.status === 'watched' && it.watchedAt ? `<span class="series">Watched ${new Date(it.watchedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>` : ''}
     ${it.followed ? indicators(it.type, it.id) : ''}</div></a>`;
 }
@@ -264,7 +361,7 @@ function libCell(it) {
 
 function renderLibrary() {
   const top = '<h2>Library</h2><a class="plus-btn" href="#/discover" aria-label="Add a movie or show">+</a>';
-  const listNames = [...new Set(store.listItems().flatMap((i) => i.lists || []))].sort();
+  const listNames = store.listNames();
   if (libState.list && !listNames.includes(libState.list)) libState.list = '';
   const all = store.listItems().filter((i) => (libState.type === 'all' || i.type === libState.type) && (!libState.list || (i.lists || []).includes(libState.list)));
   const counts = { all: all.length };
@@ -282,7 +379,7 @@ function renderLibrary() {
     <div class="toolbar">
       <div class="seg" role="group" aria-label="Type">${[['all', 'All'], ['movie', 'Movies'], ['tv', 'Shows']].map(([k, l]) => `<button data-a="lib-type" data-v="${k}" aria-pressed="${libState.type === k}">${l}</button>`).join('')}</div>
       <span class="grow"></span>
-      ${listNames.length ? `<select id="lib-list" aria-label="List"><option value="">All lists</option>${listNames.map((n) => `<option ${libState.list === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : ''}
+      <select id="lib-list" aria-label="List"><option value="">All lists</option>${listNames.map((n) => `<option ${libState.list === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}<option value="__manage">${listNames.length ? 'Edit lists…' : 'Make a list…'}</option></select>
       <select id="lib-sort" aria-label="Sort">${[['recent', 'Recent'], ['title', 'Title'], ['rating', 'Rating'], ['year', 'Year']].map(([k, l]) => `<option value="${k}" ${libState.sort === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <div class="seg" role="group" aria-label="View"><button data-a="lib-view" data-v="list" aria-pressed="${libState.view === 'list'}" aria-label="List">☰</button><button data-a="lib-view" data-v="grid" aria-pressed="${libState.view === 'grid'}" aria-label="Grid">▦</button></div>
     </div>`;
@@ -299,7 +396,7 @@ function renderLibrary() {
   } else {
     body += list.map(libRow).join('');
   }
-  return { top, body, after: () => { $('#lib-sort')?.addEventListener('change', (e) => { libState.sort = e.target.value; saveLib(); redraw(); }); $('#lib-list')?.addEventListener('change', (e) => { libState.list = e.target.value; saveLib(); redraw(); }); } };
+  return { top, body, after: () => { $('#lib-sort')?.addEventListener('change', (e) => { libState.sort = e.target.value; saveLib(); redraw(); }); $('#lib-list')?.addEventListener('change', (e) => { if (e.target.value === '__manage') { location.hash = '#/mylists'; return; } libState.list = e.target.value; saveLib(); redraw(); }); } };
 }
 
 // ---------- Discover ----------
@@ -336,24 +433,11 @@ async function renderDiscover() {
 
   let services = [];
   try { services = await T.selectedServices(); } catch { /* offline with no saved list */ }
-  const rows = [
-    { title: 'Trending this week', load: () => T.trending('week') },
-    { title: 'Popular movies', type: 'movie', load: () => T.popular('movie') },
-    { title: 'Popular shows', type: 'tv', load: () => T.popular('tv') },
-    { title: 'Coming soon to theaters', type: 'movie', load: () => T.upcomingMovies() },
-    { title: 'New episodes this week', type: 'tv', load: () => T.onTheAirTV() },
-    ...services.map((p) => ({
-      title: p.name, logo: p.logo,
-      load: async () => {
-        const [m, t] = await Promise.all([T.byProvider('movie', p.id), T.byProvider('tv', p.id)]);
-        const out = [];
-        for (let i = 0; i < Math.max(m.length, t.length); i++) { if (t[i]) out.push(t[i]); if (m[i]) out.push(m[i]); }
-        return out;
-      },
-    })),
-  ].filter((r) => !r.type || discType === 'all' || r.type === discType);
+  const rows = ['trending', 'popular-movie', 'popular-tv', 'upcoming-movie', 'onair-tv', 'new-tv', ...services.map((p) => `provider-${p.id}`)]
+    .map((key) => ({ key, ...rowSpec(key, services) }))
+    .filter((r) => !r.type || discType === 'all' || r.type === discType);
 
-  const rowsHtml = rows.map((r, i) => `<section data-row="${i}"><div class="section-h"><span>${r.logo ? `<img src="${esc(T.img(r.logo, 'w92'))}" alt="">` : ''}${esc(r.title)}</span></div>
+  const rowsHtml = rows.map((r, i) => `<section data-row="${i}"><div class="section-h"><span>${r.logo ? `<img src="${esc(T.img(r.logo, 'w92'))}" alt="">` : ''}${esc(r.title)}</span><a href="#/browse/${r.key}${discType !== 'all' && !r.type ? `?type=${discType}` : ''}">See all ›</a></div>
     <div class="shelf-scroll">${skeletonRow()}</div></section>`).join('');
   const body = `${head}<div id="results"></div><div id="rows">${rowsHtml}</div>`;
 
@@ -366,7 +450,7 @@ async function renderDiscover() {
           io.unobserve(en.target);
           const r = rows[Number(en.target.dataset.row)];
           const sc = en.target.querySelector('.shelf-scroll');
-          r.load().then((items) => {
+          loadRow(r.key, 1, discType).then(({ items }) => {
             const list = byType(items).slice(0, 20);
             sc.innerHTML = list.length ? list.map(sugCard).join('') : '<p class="author">Nothing here right now.</p>';
           }).catch((e) => { sc.outerHTML = errorBox(e); });
@@ -395,6 +479,102 @@ async function renderDiscover() {
   };
 }
 
+// ---------- Rows shared by Discover, Overview and See all ----------
+const isoDay = (offset = 0) => localDay(new Date(Date.now() + offset * 864e5));
+function rowSpec(key, services = []) {
+  const region = () => store.getSettings().region;
+  const specs = {
+    trending: { title: 'Trending this week', path: (t) => `/trending/${t === 'all' ? 'all' : t}/week` },
+    'trending-tv': { title: 'Trending shows', type: 'tv', path: () => '/trending/tv/week' },
+    'popular-movie': { title: 'Popular movies', type: 'movie', path: () => '/movie/popular' },
+    'popular-tv': { title: 'Popular shows', type: 'tv', path: () => '/tv/popular' },
+    'upcoming-movie': { title: 'Coming soon to theaters', type: 'movie', path: () => '/movie/upcoming', params: () => ({ region: region() }), keep: (m) => !m.date || m.date >= isoDay() },
+    'onair-tv': { title: 'New episodes this week', type: 'tv', path: () => '/tv/on_the_air' },
+    'new-tv': { title: 'New shows', type: 'tv', path: () => '/discover/tv', params: () => ({ 'first_air_date.gte': isoDay(-90), 'first_air_date.lte': isoDay(), sort_by: 'popularity.desc', watch_region: region(), with_watch_monetization_types: 'flatrate|free|ads' }) },
+    'for-you': { title: 'Suggested for you', type: 'tv' },
+  };
+  if (specs[key]) return specs[key];
+  const m = key.match(/^provider-(\d+)$/);
+  if (m) {
+    const p = services.find((x) => x.id === Number(m[1]));
+    return { title: p?.name || 'Streaming service', logo: p?.logo, provider: Number(m[1]) };
+  }
+  return null;
+}
+// Load one page of a row. Returns { items, more }.
+async function loadRow(key, page = 1, type = 'all') {
+  const spec = rowSpec(key);
+  if (!spec) throw new Error('That list is not available.');
+  if (key === 'for-you') return suggestions(page);
+  if (spec.provider) {
+    const region = store.getSettings().region;
+    const types = type === 'all' ? ['tv', 'movie'] : [type];
+    const res = await Promise.all(types.map((t) => T.tmdb(`/discover/${t}`, { with_watch_providers: spec.provider, watch_region: region, with_watch_monetization_types: 'flatrate', sort_by: 'popularity.desc', page })
+      .then((d) => ({ t, d }))));
+    const lists = res.map(({ t, d }) => (d.results || []).map((r) => T.norm(r, t)));
+    const items = [];
+    for (let i = 0; i < Math.max(...lists.map((l) => l.length)); i++) for (const l of lists) if (l[i]) items.push(l[i]);
+    return { items, more: res.some(({ d }) => page < Math.min(d.total_pages || 1, 500)) };
+  }
+  const d = await T.tmdb(spec.path(type), { ...(spec.params?.() || {}), page });
+  let items = (d.results || []).filter((r) => !r.media_type || r.media_type === 'movie' || r.media_type === 'tv').map((r) => T.norm(r, spec.type));
+  if (spec.keep) items = items.filter(spec.keep);
+  return { items, more: page < Math.min(d.total_pages || 1, 500) };
+}
+// Shows like the ones you rate highly or are watching, that aren't in your library yet.
+async function suggestions(page = 1) {
+  const seeds = store.listItems().filter((i) => i.type === 'tv')
+    .sort((a, b) => (b.rating || 0) - (a.rating || 0) || (b.status === 'watching') - (a.status === 'watching') || b.updatedAt - a.updatedAt)
+    .slice(0, 8);
+  if (!seeds.length) { const p = await loadRow('popular-tv', page); return p; }
+  const res = await Promise.all(seeds.map((it) => T.tmdb(`/tv/${it.id}/recommendations`, { page }).catch(() => ({ results: [] }))));
+  const lists = res.map((d) => (d.results || []).map((r) => T.norm(r, 'tv')));
+  const out = new Map();
+  for (let i = 0; i < 20; i++) for (const l of lists) if (l[i] && !out.has(l[i].id)) out.set(l[i].id, l[i]);
+  return { items: [...out.values()], more: res.some((d) => page < Math.min(d.total_pages || 1, 20)) };
+}
+const notInLibrary = (items) => items.filter((t) => !store.getItem(t.type, t.id));
+
+// "See all" for one row: as many titles as TMDB has, loaded a page at a time as you scroll.
+async function renderBrowse(r) {
+  const key = r.args[0] || '';
+  let services = [];
+  if (key.startsWith('provider-')) { try { services = await T.selectedServices(); } catch { /* ignore */ } }
+  const spec = rowSpec(key, services);
+  const type = spec?.type || r.query.get('type') || 'all';
+  const top = `<button class="icon-btn" data-a="back">‹ Back</button><h2>${esc(spec?.title || 'Browse')}</h2>`;
+  if (!spec) return { top, body: '<div class="empty-note">That list is not available.</div>' };
+  const body = `<div class="grid browse" id="browse"></div><div id="browse-more" class="loading">Loading…</div>`;
+  return {
+    top, body,
+    after: () => {
+      const grid = $('#browse'); const more = $('#browse-more');
+      const shown = new Set();
+      let page = 0, busy = false, done = false;
+      const next = async () => {
+        if (busy || done) return;
+        busy = true;
+        try {
+          const { items, more: hasMore } = await loadRow(key, ++page, type);
+          if (!grid.isConnected) return;
+          const fresh = items.filter((t) => (type === 'all' || t.type === type) && !shown.has(`${t.type}:${t.id}`));
+          fresh.forEach((t) => shown.add(`${t.type}:${t.id}`));
+          grid.insertAdjacentHTML('beforeend', fresh.map(sugCard).join(''));
+          done = !hasMore;
+          more.textContent = done ? `${shown.size} titles` : 'Loading…';
+          more.className = done ? 'muted-note' : 'loading';
+        } catch (e) { more.outerHTML = errorBox(e); done = true; }
+        busy = false;
+        // Keep going until the screen is full.
+        if (!done && more.isConnected && more.getBoundingClientRect().top < bodyEl.clientHeight + 800) next();
+      };
+      const io = new IntersectionObserver((ents) => { if (ents.some((e) => e.isIntersecting)) next(); }, { root: bodyEl, rootMargin: '800px 0px' });
+      io.observe(more);
+      next();
+    },
+  };
+}
+
 // ---------- Title page ----------
 async function renderTitle(r) {
   const [type, idStr] = r.args;
@@ -402,6 +582,7 @@ async function renderTitle(r) {
   if (!['movie', 'tv'].includes(type) || !id) { location.hash = '#/home'; return {}; }
   const top = `<button class="icon-btn" data-a="back">‹ Back</button><h2>${type === 'tv' ? 'Show' : 'Movie'}</h2>`;
   const d = await T.details(type, id);
+  if (type === 'tv') store.saveShowInfo(d);
   const t = remember(T.norm(d, type));
   const runtime = type === 'movie'
     ? (d.runtime ? `${Math.floor(d.runtime / 60)}h ${d.runtime % 60}m` : '')
@@ -431,7 +612,23 @@ async function renderTitle(r) {
     },
     follow: () => { const cur = store.getItem(type, id); if (cur) store.upsertItem(base, { followed: !cur.followed }); redraw(); },
     remove: () => { store.removeItem(type, id); toast('Removed from your library'); redraw(); },
+    'list-toggle': (el) => { store.toggleInList(base, el.dataset.v); redraw(); },
+    'list-new': () => { newListOpen = true; redraw().then(() => $('#new-list')?.focus()); },
+    'list-create': () => {
+      const name = ($('#new-list')?.value || '').trim();
+      try { store.createList(name); store.toggleInList(base, name); newListOpen = false; toast(`Added to ${name}`); } catch (e) { toast(e.message); }
+      redraw();
+    },
   });
+  const names = store.listNames();
+  const lists = it?.lists || [];
+  const listChips = `<div class="chips">${names.map((n) => `<button class="chip" data-a="list-toggle" data-v="${esc(n)}" aria-pressed="${lists.includes(n)}">${lists.includes(n) ? '✓ ' : ''}${esc(n)}</button>`).join('')}
+    ${newListOpen ? '' : '<button class="chip add-chip" data-a="list-new">+ New list</button>'}</div>
+    ${newListOpen ? '<div class="name-edit" style="margin-top:8px"><input id="new-list" placeholder="List name, like Our shows" style="flex:1;width:auto"><button class="text-btn" data-a="list-create">Create</button></div>' : ''}`;
+  const prog = type === 'tv' ? showProgress(it) : null;
+  const info = type === 'tv' ? store.getShowInfo(id) : null;
+  const eps = realEps(it);
+  const seasonSeen = (n) => (it?.status === 'watched' && !eps.length ? (info?.seasons[n]?.aired || 0) : eps.filter((c) => c.startsWith(`${n}x`)).length);
 
   const body = `
     ${d.backdrop_path ? `<div class="backdrop"><img src="${esc(T.img(d.backdrop_path, 'w780'))}" alt=""></div>` : ''}
@@ -449,20 +646,131 @@ async function renderTitle(r) {
     <div class="status-pick">${Object.entries(STATUS).map(([k, s]) => `<button data-a="set-status" data-v="${k}" aria-pressed="${it?.status === k}"><span class="dot" style="background:${s.color}"></span>${s.name}</button>`).join('')}</div>
     <div class="label">Your rating</div>
     <div>${[1, 2, 3, 4, 5].map((n) => `<button class="star ${(it?.rating || 0) >= n ? 'on' : ''}" data-a="rate" data-v="${n}" aria-label="${n} star${n > 1 ? 's' : ''}">★</button>`).join('')}</div>
+    <div class="label">Lists</div>${listChips}
     ${it ? `<div class="toggle-row" style="margin-top:12px"><div>Follow updates<small>${type === 'tv' ? 'New seasons and episodes show up in Alerts.' : 'The release date shows up in Alerts.'}</small></div><button class="switch" role="switch" aria-checked="${!!it.followed}" aria-label="Follow updates" data-a="follow"></button></div>` : ''}
 
     ${d.tagline ? `<p class="author" style="margin:16px 0 4px"><i>${esc(d.tagline)}</i></p>` : ''}
     <p style="margin:${d.tagline ? '0' : '16px'} 0 0">${esc(d.overview || 'No overview available.')}</p>
 
+    ${seasons.length ? `<div class="label">Seasons</div>
+      ${prog?.aired && prog.seen ? `<div class="card">${progressHtml(it)}</div>` : ''}
+      <div class="seasons">${seasons.map((s) => {
+        const aired = info?.seasons[s.season_number]?.aired ?? 0;
+        const got = Math.min(seasonSeen(s.season_number), aired || Infinity);
+        return `<a class="season-row" href="#/season/${id}/${s.season_number}">${cover({ title: s.name, poster: s.poster_path || t.poster, type: 'tv', year: s.air_date?.slice(0, 4) || '' }, '', 'w154')}
+        <div class="meta"><span class="title">${esc(s.name)}</span>
+          <span class="author">${s.episode_count || '?'} episodes${s.air_date ? ` · ${esc(daysUntil(s.air_date) > 0 ? `premieres ${fmtDate(s.air_date)}` : s.air_date.slice(0, 4))}` : ' · date TBA'}</span>
+          ${aired ? `${bar(got, aired)}<span class="series">${got === aired ? '✓ Watched' : `${got} of ${aired} watched`}</span>` : ''}</div><span class="chev">›</span></a>`;
+      }).join('')}</div>` : ''}
+
     <div class="label">Where to watch</div>
     <div class="card">${groups || `<p class="author" style="margin:0">No streaming info for region ${esc(region)} yet.</p>`}
       <div class="srcnote">Streaming info from <a href="https://www.justwatch.com" target="_blank" rel="noopener">JustWatch</a> via TMDB · ${esc(region)}</div></div>
 
-    ${seasons.length ? `<div class="label">Seasons</div><div class="card"><dl class="kv">${seasons.map((s) => `<dt>${esc(s.name)}</dt><dd>${s.episode_count || '?'} episodes · ${esc(fmtDate(s.air_date))}</dd>`).join('')}</dl></div>` : ''}
     ${cast.length ? `<div class="label">Cast</div><div class="cast">${cast.map((c) => `<div>${c.profile_path ? `<img loading="lazy" src="${esc(T.img(c.profile_path, 'w185'))}" alt="">` : '<span class="ph"></span>'}<b>${esc(c.name)}</b><br><span>${esc(c.character || '')}</span></div>`).join('')}</div>` : ''}
     ${it ? '<button class="danger-btn" style="margin-top:18px" data-a="remove">Remove from library</button>' : ''}
     <div class="srcnote"><a href="https://www.themoviedb.org/${type}/${id}" target="_blank" rel="noopener">View on TMDB ↗</a></div>`;
+  return { top, body, after: () => $('#new-list')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') actions['list-create'](); if (e.key === 'Escape') { newListOpen = false; redraw(); } }) };
+}
+
+let newListOpen = false;
+
+// ---------- Season: every episode, with a check on the ones you've watched ----------
+let openOverview = new Set();
+async function renderSeason(r) {
+  const id = Number(r.args[0]); const n = Number(r.args[1]);
+  if (!id || Number.isNaN(n)) { location.hash = '#/home'; return {}; }
+  const [show, season] = await Promise.all([T.tvLite(id), T.tmdb(`/tv/${id}/season/${n}`)]);
+  store.saveShowInfo(show);
+  const t = remember(T.norm(show, 'tv'));
+  const base = { id, type: 'tv', title: t.title, poster: t.poster, year: t.year };
+  const it = store.getItem('tv', id);
+  const info = store.getShowInfo(id);
+  const today = isoDay();
+  const episodes = season.episodes || [];
+  const allDone = it?.status === 'watched' && !realEps(it).length;
+  const watched = (e) => allDone ? (e.air_date && e.air_date <= today) : !!it?.eps?.includes(`${n}x${e.episode_number}`);
+  const airedCodes = episodes.filter((e) => e.air_date && e.air_date <= today).map((e) => `${n}x${e.episode_number}`);
+  const seenHere = episodes.filter(watched).length;
+  // If the show was marked Watched without episode detail, write the full list out before changing one.
+  const expand = () => {
+    if (!allDone || !info) return;
+    const codes = [];
+    for (const [sn, si] of Object.entries(info.seasons)) for (let k = 1; k <= si.aired; k++) codes.push(`${sn}x${k}`);
+    store.setEpisodes(base, codes, true, info.aired);
+  };
+  Object.assign(actions, {
+    ep: (el) => {
+      expand();
+      const code = el.dataset.v; const on = !store.getItem('tv', id)?.eps?.includes(code);
+      const after = store.setEpisodes(base, [code], on, store.getShowInfo(id)?.aired);
+      if (on && after.status === 'watched') toast(`All caught up on ${t.title}`);
+      redraw();
+    },
+    'season-all': (el) => { expand(); store.setEpisodes(base, airedCodes, el.dataset.v === 'on', store.getShowInfo(id)?.aired); redraw(); },
+    'ep-more': (el) => { const k = el.dataset.v; openOverview.has(k) ? openOverview.delete(k) : openOverview.add(k); el.classList.toggle('open'); },
+  });
+  const top = `<button class="icon-btn" data-a="back">‹ Back</button><h2>${esc(season.name || `Season ${n}`)}</h2>`;
+  const runtime = (m) => (m ? (m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`) : '');
+  const body = `
+    <a class="season-head" href="#/title/tv/${id}">${cover(t, '', 'w154')}<div class="meta"><span class="title">${esc(t.title)}</span>
+      <span class="author">${esc([season.name, season.air_date?.slice(0, 4), `${episodes.length} episodes`].filter(Boolean).join(' · '))}</span>
+      ${airedCodes.length ? `${bar(seenHere, airedCodes.length)}<span class="series">${seenHere} of ${airedCodes.length} watched</span>` : ''}</div></a>
+    ${season.overview ? `<p class="author" style="margin:10px 0 0">${esc(season.overview)}</p>` : ''}
+    ${airedCodes.length ? `<button class="ghost-btn" style="border-style:solid;margin:12px 0 4px" data-a="season-all" data-v="${seenHere >= airedCodes.length ? 'off' : 'on'}">${seenHere >= airedCodes.length ? 'Mark season unwatched' : 'Mark season watched'}</button>` : ''}
+    <div class="eps">${episodes.map((e) => {
+      const code = `${n}x${e.episode_number}`;
+      const aired = e.air_date && e.air_date <= today;
+      const w = watched(e);
+      const still = T.img(e.still_path || show.backdrop_path, 'w300');
+      const meta = [e.air_date ? (aired ? fmtDate(e.air_date) : `Airs ${fmtDate(e.air_date)} · ${inDays(e.air_date)}`) : 'Date TBA', runtime(e.runtime), e.vote_average ? `★ ${e.vote_average.toFixed(1)}` : ''].filter(Boolean).join(' · ');
+      return `<div class="ep ${w ? 'seen' : ''}">
+        <button class="still" ${aired ? `data-a="ep" data-v="${code}"` : 'disabled'} aria-label="${w ? 'Mark not watched' : 'Mark watched'}: episode ${e.episode_number}">
+          ${still ? `<img src="${esc(still)}" alt="" loading="lazy">` : ''}<span class="ep-num">E${e.episode_number}</span>${w ? `<span class="check">${CHECK_SVG}</span>` : ''}</button>
+        <div class="meta"><span class="title">${e.episode_number}. ${esc(e.name || `Episode ${e.episode_number}`)}</span>
+          <span class="author">${esc(meta)}</span>
+          ${e.overview ? `<p class="ep-ov ${openOverview.has(code) ? 'open' : ''}" data-a="ep-more" data-v="${code}">${esc(e.overview)}</p>` : ''}
+          ${aired ? `<button class="text-btn" data-a="ep" data-v="${code}">${w ? '✓ Watched' : 'Mark watched'}</button>` : ''}</div></div>`;
+    }).join('') || '<p class="author">No episode details yet.</p>'}</div>`;
   return { top, body };
+}
+
+// ---------- Your lists ----------
+let renaming = null;
+let confirmDelete = null;
+Object.assign(actions, {
+  'mylist-open': (el) => { libState.list = el.dataset.v; libState.shelf = 'all'; libState.type = 'all'; saveLib(); location.hash = '#/library'; },
+  'mylist-create': () => { try { store.createList($('#ml-new').value); toast('List created'); } catch (e) { toast(e.message); } redraw(); },
+  'mylist-rename': (el) => { renaming = el.dataset.v; confirmDelete = null; redraw().then(() => $('#ml-rename')?.focus()); },
+  'mylist-save': () => {
+    try { store.renameList(renaming, $('#ml-rename').value); if (libState.list === renaming) { libState.list = $('#ml-rename').value.trim(); saveLib(); } renaming = null; } catch (e) { toast(e.message); }
+    redraw();
+  },
+  'mylist-cancel': () => { renaming = null; confirmDelete = null; redraw(); },
+  'mylist-delete': (el) => {
+    if (confirmDelete !== el.dataset.v) { confirmDelete = el.dataset.v; redraw(); return; }
+    store.deleteList(el.dataset.v); confirmDelete = null; toast('List deleted. The titles stay in your library.'); redraw();
+  },
+});
+function renderMyLists() {
+  const names = store.listNames();
+  const items = store.listItems();
+  const top = '<button class="icon-btn" data-a="back">‹ Library</button><h2>Your lists</h2>';
+  const body = `<p class="author" style="margin:0 0 10px">Make as many lists as you like, such as one for you, one for your wife, and one you watch together. A title can be on more than one list. Add titles from each title's page.</p>
+    <div class="card"><h3>New list</h3><div class="name-edit"><input id="ml-new" placeholder="List name" style="flex:1;width:auto"><button class="text-btn" data-a="mylist-create">Create</button></div></div>
+    ${names.length ? names.map((n) => {
+      const on = items.filter((i) => i.lists?.includes(n));
+      const shows = on.filter((i) => i.type === 'tv').length;
+      return `<div class="list-row">${renaming === n
+        ? `<div class="name-edit" style="flex:1"><input id="ml-rename" value="${esc(n)}" style="flex:1;width:auto"><button class="text-btn" data-a="mylist-save">Save</button><button class="text-btn" data-a="mylist-cancel" style="color:var(--muted)">Cancel</button></div>`
+        : `<button class="list-name" data-a="mylist-open" data-v="${esc(n)}"><b>${esc(n)}</b><span class="author">${shows} show${shows === 1 ? '' : 's'} · ${on.length - shows} movie${on.length - shows === 1 ? '' : 's'}</span></button>
+          <button class="text-btn" data-a="mylist-rename" data-v="${esc(n)}">Rename</button>
+          <button class="text-btn" style="color:var(--red)" data-a="mylist-delete" data-v="${esc(n)}">${confirmDelete === n ? 'Tap again to delete' : 'Delete'}</button>`}</div>`;
+    }).join('') : '<div class="empty-note">No lists yet. Create one above.</div>'}`;
+  return { top, body, after: () => {
+    $('#ml-new')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') actions['mylist-create'](); });
+    $('#ml-rename')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') actions['mylist-save'](); if (e.key === 'Escape') actions['mylist-cancel'](); });
+  } };
 }
 
 // ---------- Alerts ----------

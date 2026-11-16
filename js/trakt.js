@@ -89,6 +89,7 @@ export function parseTrakt(files) {
       watchedAt: caughtUp ? ts(s.last_watched_at) : undefined,
       startedAt: firstSeen.get(id),
       progress: { seen, aired },
+      eps: [...(eps.get(id) || [])],
     });
   }
 

@@ -4,6 +4,7 @@
 const SETTINGS_KEY = 'wt.settings';
 const LIBRARY_KEY = 'wt.library';
 const UPDATES_KEY = 'wt.updates';
+const SHOWINFO_KEY = 'wt.showinfo';
 
 const DEFAULT_SETTINGS = {
   tmdbKey: '',          // TMDB v3 API key or v4 read access token. Stays on this device.
@@ -49,15 +50,18 @@ export function saveSettings(patch) {
 // ---- Library ----
 // Shape: { version: 1, updatedAt, items: { "tv:1399": Item }, seenUpdates: { key: ts } }
 // Item: { key, id, type: 'movie'|'tv', title, poster, year, status: 'watchlist'|'watching'|'watched',
-//         rating: 0-5, followed: bool, addedAt, updatedAt, deleted? }
+//         rating: 0-5, followed: bool, addedAt, updatedAt, deleted?,
+//         lists: [list name], eps: ["1x3", ...] watched episodes (shows) }
+// lib.listDefs: { name: { createdAt, updatedAt, deleted? } } for lists you create and name.
 
 function emptyLibrary() {
-  return { version: 1, updatedAt: 0, items: {}, seenUpdates: {} };
+  return { version: 1, updatedAt: 0, items: {}, seenUpdates: {}, listDefs: {} };
 }
 export function getLibrary() {
   const lib = read(LIBRARY_KEY, null) || emptyLibrary();
   lib.items ||= {};
   lib.seenUpdates ||= {};
+  lib.listDefs ||= {};
   return lib;
 }
 export function setLibrary(lib, { silent = false } = {}) {
@@ -117,7 +121,7 @@ export function bulkImport(list) {
     if (!cur) {
       lib.items[key] = {
         key, id: inc.id, type: inc.type, title: inc.title, poster: inc.poster ?? null, year: inc.year ?? '',
-        status: inc.status, rating: inc.rating || 0, followed: true, lists: inc.lists || [],
+        status: inc.status, rating: inc.rating || 0, followed: true, lists: inc.lists || [], ...(inc.eps?.length ? { eps: inc.eps } : {}),
         addedAt: inc.addedAt || inc.watchedAt || inc.startedAt || now,
         ...(inc.watchedAt ? { watchedAt: inc.watchedAt } : {}), ...(inc.startedAt ? { startedAt: inc.startedAt } : {}),
         source: 'trakt', updatedAt: now,
@@ -125,6 +129,7 @@ export function bulkImport(list) {
       added++;
     } else {
       const next = { ...cur, lists: [...new Set([...(cur.lists || []), ...(inc.lists || [])])] };
+      if (inc.eps?.length) next.eps = [...new Set([...(cur.eps || []), ...inc.eps])];
       if (rank[inc.status] > rank[cur.status] && cur.status === 'watchlist') {
         next.status = inc.status;
         if (inc.watchedAt) next.watchedAt = inc.watchedAt;
@@ -134,6 +139,7 @@ export function bulkImport(list) {
       if (JSON.stringify(next) !== JSON.stringify(cur)) { next.updatedAt = now; lib.items[key] = next; updated++; }
     }
   }
+  for (const inc of list) for (const n of inc.lists || []) if (!lib.listDefs[n] || lib.listDefs[n].deleted) lib.listDefs[n] = { createdAt: now, updatedAt: now };
   lib.updatedAt = now;
   setLibrary(lib);
   return { added, updated };
@@ -156,6 +162,87 @@ export function removeItem(type, id) {
   setLibrary(lib);
 }
 
+// ---- Episodes ----
+// Mark episodes watched or not. Keeps the show's status in step:
+// some watched = Watching, every aired episode watched = Watched.
+export function setEpisodes(base, codes, watched, airedTotal) {
+  const cur = getItem(base.type, base.id);
+  const set = new Set(cur?.eps || []);
+  for (const c of codes) watched ? set.add(c) : set.delete(c);
+  const eps = [...set];
+  const patch = { eps };
+  if (airedTotal && eps.length >= airedTotal) patch.status = 'watched';
+  else if (eps.length) { if (cur?.status !== 'watching') patch.status = 'watching'; }
+  else if (cur?.status === 'watched' || cur?.status === 'watching') patch.status = 'watchlist';
+  return upsertItem(base, patch);
+}
+
+// ---- Lists you name yourself ----
+export function listNames() {
+  const lib = getLibrary();
+  const names = new Set(Object.entries(lib.listDefs).filter(([, d]) => !d.deleted).map(([n]) => n));
+  for (const it of Object.values(lib.items)) if (!it.deleted) for (const n of it.lists || []) names.add(n);
+  return [...names].sort((a, b) => a.localeCompare(b));
+}
+export function createList(name) {
+  name = name.trim();
+  if (!name) throw new Error('Give the list a name.');
+  const lib = getLibrary();
+  if (listNames().some((n) => n.toLowerCase() === name.toLowerCase())) throw new Error(`You already have a list called ${name}.`);
+  const now = Date.now();
+  lib.listDefs[name] = { createdAt: now, updatedAt: now };
+  lib.updatedAt = now;
+  setLibrary(lib);
+}
+export function renameList(from, to) {
+  to = to.trim();
+  if (!to || to === from) return;
+  if (listNames().some((n) => n !== from && n.toLowerCase() === to.toLowerCase())) throw new Error(`You already have a list called ${to}.`);
+  const lib = getLibrary();
+  const now = Date.now();
+  lib.listDefs[from] = { ...(lib.listDefs[from] || { createdAt: now }), deleted: true, updatedAt: now };
+  lib.listDefs[to] = { createdAt: now, updatedAt: now };
+  for (const it of Object.values(lib.items)) if (!it.deleted && it.lists?.includes(from)) { it.lists = it.lists.map((n) => (n === from ? to : n)); it.updatedAt = now; }
+  lib.updatedAt = now;
+  setLibrary(lib);
+}
+export function deleteList(name) {
+  const lib = getLibrary();
+  const now = Date.now();
+  lib.listDefs[name] = { ...(lib.listDefs[name] || { createdAt: now }), deleted: true, updatedAt: now };
+  for (const it of Object.values(lib.items)) if (!it.deleted && it.lists?.includes(name)) { it.lists = it.lists.filter((n) => n !== name); it.updatedAt = now; }
+  lib.updatedAt = now;
+  setLibrary(lib);
+}
+export function toggleInList(base, name) {
+  const cur = getItem(base.type, base.id);
+  const lists = new Set(cur?.lists || []);
+  lists.has(name) ? lists.delete(name) : lists.add(name);
+  return upsertItem(base, { lists: [...lists] });
+}
+
+// ---- Show info (episode counts per season), cached on this device ----
+export function getShowInfo(id) { return read(SHOWINFO_KEY, {})[id] || null; }
+export function allShowInfo() { return read(SHOWINFO_KEY, {}); }
+// From a TMDB /tv/{id} response: aired episodes per season (specials left out).
+export function saveShowInfo(show) {
+  if (!show?.id || !Array.isArray(show.seasons)) return;
+  const last = show.last_episode_to_air;
+  const seasons = {};
+  let aired = 0, total = 0;
+  for (const s of show.seasons) {
+    if (!s.season_number) continue;
+    const count = s.episode_count || 0;
+    let a = 0;
+    if (last) a = s.season_number < last.season_number ? count : s.season_number === last.season_number ? Math.min(count || last.episode_number, last.episode_number) : 0;
+    seasons[s.season_number] = { count, aired: a };
+    aired += a; total += count;
+  }
+  const all = read(SHOWINFO_KEY, {});
+  all[show.id] = { seasons, aired, total, t: Date.now() };
+  write(SHOWINFO_KEY, all);
+}
+
 export function markUpdatesSeen(keys) {
   const lib = getLibrary();
   let changed = false;
@@ -175,6 +262,10 @@ export function mergeLibraries(a, b) {
     out.items[k] = !x ? y : !y ? x : (y.updatedAt > x.updatedAt ? y : x);
   }
   out.seenUpdates = { ...(b.seenUpdates || {}), ...(a.seenUpdates || {}) };
+  for (const k of new Set([...Object.keys(a.listDefs || {}), ...Object.keys(b.listDefs || {})])) {
+    const x = a.listDefs?.[k], y = b.listDefs?.[k];
+    out.listDefs[k] = !x ? y : !y ? x : (y.updatedAt > x.updatedAt ? y : x);
+  }
   // Drop seen markers and tombstones older than 180 days to keep the file small.
   const cutoff = Date.now() - 180 * 864e5;
   for (const [k, ts] of Object.entries(out.seenUpdates)) if (ts < cutoff) delete out.seenUpdates[k];
