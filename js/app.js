@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.8.3';
+const APP_VERSION = '0.8.4';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -1300,8 +1300,9 @@ Object.assign(actions, {
     const wrap = document.createElement('div');
     wrap.id = 'trailer'; wrap.className = 'trailer'; wrap.setAttribute('role', 'dialog'); wrap.setAttribute('aria-label', `Trailer: ${el.dataset.t}`);
     wrap.innerHTML = `<div class="trailer-box"><div class="trailer-bar"><b>${esc(el.dataset.t)}</b><button class="icon-btn" data-a="trailer-close" aria-label="Close trailer">✕ Close</button></div>
-      <div class="trailer-frame"><iframe src="https://www.youtube-nocookie.com/embed/${key}?autoplay=1&playsinline=1&rel=0" title="Trailer" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div>
-      <a class="srcnote" href="https://www.youtube.com/watch?v=${key}" target="_blank" rel="noopener">Open in YouTube ↗</a></div>`;
+      <div class="trailer-frame"><iframe src="https://www.youtube.com/embed/${key}?autoplay=1&playsinline=1&rel=0" title="Trailer" allow="autoplay; encrypted-media; picture-in-picture; fullscreen; web-share" allowfullscreen></iframe></div>
+      <div class="trailer-foot"><span>Tap the cast icon in the player, or open it in the YouTube app to cast or AirPlay to your TV.</span>
+      <a class="cast-btn" href="https://www.youtube.com/watch?v=${key}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M21 3H3a2 2 0 0 0-2 2v3h2V5h18v14h-7v2h7a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zM1 18v3h3a3 3 0 0 0-3-3zm0-4v2a5 5 0 0 1 5 5h2a7 7 0 0 0-7-7zm0-4v2a9 9 0 0 1 9 9h2A11 11 0 0 0 1 10z"/></svg>Cast with YouTube</a></div></div>`;
     wrap.addEventListener('click', (e) => { if (e.target === wrap) closeTrailer(); });
     document.body.appendChild(wrap);
     document.addEventListener('keydown', trailerKey);
