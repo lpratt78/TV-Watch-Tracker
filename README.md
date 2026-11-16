@@ -26,7 +26,7 @@ python3 -m http.server 8080
 | TMDB API key | themoviedb.org → Settings → API | App → Settings → TMDB |
 | Google OAuth client ID | Google Cloud console (see [GOOGLE-SETUP.md](GOOGLE-SETUP.md)) | App → Settings → Google Drive sync |
 
-Both are stored in the browser's local storage on each device. Optionally, copy `config.example.js` to `config.js` to preset them; `config.js` is git-ignored.
+Keys typed in Settings are stored only on that device. This deployment also ships `config.js` with the TMDB key built in, so every device works without setup; a key in Settings overrides it.
 
 ## Hosting on GitHub Pages
 

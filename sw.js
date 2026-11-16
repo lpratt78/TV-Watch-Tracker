@@ -1,5 +1,5 @@
 // Service worker: offline app shell, cached TMDB images, network-first TMDB API.
-const VERSION = 'wt-v0.1.1';
+const VERSION = 'wt-v0.1.2';
 const SHELL = `${VERSION}-shell`;
 const IMAGES = 'wt-images';
 const API = 'wt-api';
@@ -63,8 +63,20 @@ self.addEventListener('fetch', (e) => {
   }
 
   if (url.origin === self.location.origin) {
-    // Optional config.js: always try the network so edits show up.
-    if (url.pathname.endsWith('/config.js')) return;
+    // config.js: network first so edits show up, cached copy when offline.
+    if (url.pathname.endsWith('/config.js')) {
+      e.respondWith((async () => {
+        const c = await caches.open(SHELL);
+        try {
+          const res = await fetch(req);
+          if (res.ok) c.put(req, res.clone());
+          return res;
+        } catch {
+          return (await c.match(req)) || new Response('', { headers: { 'content-type': 'text/javascript' } });
+        }
+      })());
+      return;
+    }
     e.respondWith((async () => {
       const c = await caches.open(SHELL);
       const hit = await c.match(req, { ignoreSearch: true });
