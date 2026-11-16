@@ -4,5 +4,5 @@
 // A key typed into Settings on a device takes priority over this one.
 window.WT_CONFIG = {
   tmdbKey: 'c31e1a868fb506ce47d02fc04559a492',
-  googleClientId: '', // add once the Google OAuth client exists
+  googleClientId: '612043297837-soidpcgim4j5ph9hfqbe4tlvgd32b25c.apps.googleusercontent.com',
 };
