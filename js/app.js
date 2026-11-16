@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.6.1';
+const APP_VERSION = '0.6.2';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -51,12 +51,29 @@ const colorFor = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.
 const typeTxt = (t) => [t.type === 'tv' ? 'TV' : 'Movie', t.year].filter(Boolean).join(' · ');
 
 // Poster in the Book Tracker "cover" style: colored title card underneath, image on top.
+// Whether a show is still running, from TMDB's status: ongoing (green), canceled (red), ended (purple).
+const RUN = {
+  ongoing: { name: 'Ongoing', tip: 'Still making new episodes' },
+  canceled: { name: 'Canceled', tip: 'Canceled before the story finished' },
+  ended: { name: 'Ended', tip: 'The story is finished' },
+};
+function runState(status) {
+  const s = String(status || '').toLowerCase();
+  if (!s) return null;
+  if (s.includes('cancel')) return 'canceled';
+  if (s === 'ended') return 'ended';
+  return 'ongoing'; // Returning Series, In Production, Planned, Pilot
+}
+const runOf = (t) => (t.type === 'tv' && t.id ? runState(t.runStatus || store.getShowInfo(t.id)?.status) : null);
+const runTag = (t) => { const r = runOf(t); return r ? `<span class="run run-${r}" title="${RUN[r].tip}">${RUN[r].name}</span>` : ''; };
+
 function cover(t, style = '', size = 'w342') {
   const src = T.img(t.poster, size);
+  const run = runOf(t);
   const lib = t.key ? t : store.getItem(t.type, t.id);
   const check = lib?.status === 'watched'
     ? '<span class="check" aria-label="Watched"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 8.4l2.6 2.6L12 5.4" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>' : '';
-  return `<div class="cover" style="background:${colorFor(t.title)};${style}"><b>${esc(t.title)}</b><i>${esc(typeTxt(t))}</i>${src ? `<img src="${esc(src)}" alt="" loading="lazy">` : ''}${check}</div>`;
+  return `<div class="cover${run ? ` ring-${run}` : ''}" style="background:${colorFor(t.title)};${style}"><b>${esc(t.title)}</b><i>${esc(typeTxt(t))}</i>${src ? `<img src="${esc(src)}" alt="" loading="lazy">` : ''}${check}</div>`;
 }
 const stars = (r) => `<span class="stars-row" aria-label="${r} of 5 stars">${[1, 2, 3, 4, 5].map((i) => `<span class="star ${r >= i ? 'on' : ''}">★</span>`).join('')}</span>`;
 const statusTag = (s) => `<span class="status"><span class="dot" style="background:${STATUS[s].color}"></span>${STATUS[s].name}</span>`;
@@ -298,7 +315,7 @@ function renderHome() {
         <span class="hint">${watchOpen ? 'Tap to close' : 'Tap to see each one'}</span></span>
       <span class="chev" aria-hidden="true">›</span></button>`;
     if (watchOpen) body += `<div class="stack-list">${watching.map((it) => `<a class="now" href="#/title/${it.type}/${it.id}">${cover(it)}<div class="meta">
-      <span class="title">${esc(it.title)}</span><span class="author">${esc(typeTxt(it))}</span>
+      <span class="title">${esc(it.title)}</span><span class="author">${esc(typeTxt(it))}${runTag(it)}</span>
       ${nextUp(it) ? `<span class="series">${esc(nextUp(it))}</span>` : ''}${progressHtml(it)}
       ${it.rating ? stars(it.rating) : ''}</div></a>`).join('')}</div>`;
   }
@@ -360,7 +377,7 @@ Object.assign(actions, {
 
 function libRow(it) {
   return `<a class="book-row" href="#/title/${it.type}/${it.id}">${cover(it, '', 'w154')}<div class="meta">
-    <span class="title">${esc(it.title)}</span><span class="author">${esc(typeTxt(it))}</span>
+    <span class="title">${esc(it.title)}</span><span class="author">${esc(typeTxt(it))}${runTag(it)}</span>
     ${it.rating ? stars(it.rating) : ''}
     ${it.type === 'tv' && it.status !== 'watchlist' ? progressHtml(it) : ''}
     ${it.status === 'watched' && it.watchedAt ? `<span class="series">Watched ${new Date(it.watchedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>` : ''}
@@ -660,7 +677,7 @@ async function renderTitle(r) {
       <div class="author">${esc([type === 'tv' ? 'TV' : 'Movie', t.year, runtime].filter(Boolean).join(' · '))}</div>
       ${genres ? `<div class="author">${esc(genres)}</div>` : ''}
       ${d.vote_average ? `<div class="series" style="margin-top:4px">TMDB ★ ${d.vote_average.toFixed(1)}/10</div>` : ''}
-      ${type === 'tv' && d.status ? `<div class="series">${esc(d.status)}</div>` : ''}
+      ${type === 'tv' && d.status ? `<div class="series">${runTag({ type, id, runStatus: d.status }) || esc(d.status)}</div>` : ''}
       ${nextEp?.air_date ? `<span class="pill warn" style="margin-top:6px">S${nextEp.season_number} E${nextEp.episode_number} ${esc(inDays(nextEp.air_date))}</span>` : ''}
       ${releaseSoon ? `<span class="pill warn" style="margin-top:6px">Releases ${esc(inDays(d.release_date))}</span>` : ''}
     </div></div>
@@ -1089,7 +1106,7 @@ async function startup() {
     try { await sync.syncNow(); } catch (e) { console.warn('Sync failed', e); }
   } else if (sync.isSignedIn()) sync.preload();
   if (store.getSettings().tmdbKey) {
-    const needsInfo = store.listItems().some((i) => i.type === 'tv' && i.followed && store.getShowInfo(i.id)?.runtime === undefined);
+    const needsInfo = store.listItems().some((i) => i.type === 'tv' && i.followed && store.getShowInfo(i.id)?.status === undefined);
     try { await checkUpdates({ force: needsInfo }); } catch (e) { console.warn('Update check failed', e); }
   }
 }

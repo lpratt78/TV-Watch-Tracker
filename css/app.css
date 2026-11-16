@@ -303,3 +303,16 @@ section[data-home-row] .section-h{margin-top:18px}
 .time-left{flex:none;font-weight:600;color:var(--accent)}
 .pct em{display:block;font-style:normal;font:600 10.5px var(--body);color:var(--accent);margin-top:2px;white-space:nowrap}
 .book-row .time-left{display:none}
+
+/* Show running status: a thin colored ring on the poster and a small label */
+:root{--run-ongoing:#2e9e6a;--run-canceled:#d64545;--run-ended:#8a5cd6}
+.cover[class*="ring-"]::after{content:"";position:absolute;inset:0;border-radius:inherit;z-index:1;pointer-events:none;box-shadow:inset 0 0 0 2.5px var(--ring)}
+.cover.ring-ongoing{--ring:var(--run-ongoing)}
+.cover.ring-canceled{--ring:var(--run-canceled)}
+.cover.ring-ended{--ring:var(--run-ended)}
+.fan .cover::after,.sug .cover::after{display:none}
+.run{display:inline-block;margin-left:6px;font:600 10.5px var(--body);padding:0 6px;border-radius:5px;vertical-align:1px;color:#fff}
+.run-ongoing{background:var(--run-ongoing)}
+.run-canceled{background:var(--run-canceled)}
+.run-ended{background:var(--run-ended)}
+.series .run{margin-left:0}
