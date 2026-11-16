@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.5.2';
+const APP_VERSION = '0.6.0';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -603,7 +603,8 @@ async function renderTitle(r) {
   const wp = d['watch/providers']?.results?.[region];
   const groups = [['flatrate', 'Stream'], ['free', 'Free'], ['ads', 'Free with ads'], ['rent', 'Rent'], ['buy', 'Buy']]
     .filter(([k]) => wp?.[k]?.length)
-    .map(([k, label]) => `<div class="pgroup"><small>${label}</small><div class="providers">${wp[k].map((p) => `<a href="${esc(wp.link)}" target="_blank" rel="noopener" title="${esc(p.provider_name)}"><img src="${esc(T.img(p.logo_path, 'w92'))}" alt="${esc(p.provider_name)}"></a>`).join('')}</div></div>`).join('');
+    .map(([k, label]) => `<div class="pgroup"><small>${label}</small><div class="providers">${wp[k].map((p) => `<a href="${esc(watchUrl(p.provider_name, t.title, wp.link))}" target="_blank" rel="noopener" title="Open in ${esc(p.provider_name)}"><img src="${esc(T.img(p.logo_path, 'w92'))}" alt="${esc(p.provider_name)}"></a>`).join('')}</div></div>`).join('');
+  const mainProv = ['flatrate', 'free', 'ads'].map((k) => wp?.[k]?.[0]).find(Boolean);
   const seasons = type === 'tv' ? (d.seasons || []).filter((s) => s.season_number > 0) : [];
   const nextEp = d.next_episode_to_air;
   const cast = (d.credits?.cast || []).slice(0, 15);
@@ -675,7 +676,8 @@ async function renderTitle(r) {
       }).join('')}</div>` : ''}
 
     <div class="label">Where to watch</div>
-    <div class="card">${groups || `<p class="author" style="margin:0">No streaming info for region ${esc(region)} yet.</p>`}
+    <div class="card">${mainProv ? `<a class="primary watch-btn" href="${esc(watchUrl(mainProv.provider_name, t.title, wp.link))}" target="_blank" rel="noopener"><img src="${esc(T.img(mainProv.logo_path, 'w92'))}" alt="">Watch on ${esc(mainProv.provider_name)}</a>
+      <p class="author" style="margin:6px 0 10px">Tap any logo to open the show in that service.</p>` : ''}${groups || `<p class="author" style="margin:0">No streaming info for region ${esc(region)} yet.</p>`}
       <div class="srcnote">Streaming info from <a href="https://www.justwatch.com" target="_blank" rel="noopener">JustWatch</a> via TMDB · ${esc(region)}</div></div>
 
     ${cast.length ? `<div class="label">Cast</div><div class="cast">${cast.map((c) => `<div>${c.profile_path ? `<img loading="lazy" src="${esc(T.img(c.profile_path, 'w185'))}" alt="">` : '<span class="ph"></span>'}<b>${esc(c.name)}</b><br><span>${esc(c.character || '')}</span></div>`).join('')}</div>` : ''}
@@ -817,6 +819,40 @@ function libraryCard(items) {
       <span class="author">Everything you've added: ${shows} show${shows === 1 ? '' : 's'} · ${items.length - shows} movie${items.length - shows === 1 ? '' : 's'}</span>
       <span class="series">${watching} watching · ${toWatch} to watch</span></span>
     <span class="chev" aria-hidden="true">›</span></a>`;
+}
+
+// ---------- Open a title in a streaming service ----------
+// Services don't share title links with other apps, so each one opens its own search for the title.
+// That opens the service's app on phones that have it. Anything unknown falls back to the JustWatch page on TMDB.
+const WATCH_SEARCH = [
+  [/^netflix/, 'https://www.netflix.com/search?q='],
+  [/amazon prime|prime video|amazon video/, 'https://www.amazon.com/s?i=instant-video&k='],
+  [/disney/, 'https://www.disneyplus.com/search?q='],
+  [/^(hbo )?max|hbo/, 'https://play.hbomax.com/search?q='],
+  [/^hulu/, 'https://www.hulu.com/search?q='],
+  [/apple tv/, 'https://tv.apple.com/search?term='],
+  [/paramount/, 'https://www.paramountplus.com/search/?q='],
+  [/peacock/, 'https://www.peacocktv.com/search?q='],
+  [/^tubi/, 'https://tubitv.com/search/'],
+  [/pluto/, 'https://pluto.tv/search/details?query='],
+  [/youtube tv/, 'https://tv.youtube.com/search?q='],
+  [/youtube/, 'https://www.youtube.com/results?search_query='],
+  [/crunchyroll/, 'https://www.crunchyroll.com/search?q='],
+  [/roku/, 'https://therokuchannel.roku.com/search/'],
+  [/fandango|vudu/, 'https://athome.fandango.com/content/search?searchString='],
+  [/google play/, 'https://play.google.com/store/search?c=movies&q='],
+  [/amc/, 'https://www.amcplus.com/search?q='],
+  [/starz/, 'https://www.starz.com/us/en/search?q='],
+  [/mgm|epix/, 'https://www.mgmplus.com/search?q='],
+  [/angel/, 'https://www.angel.com/search?q='],
+  [/shudder/, 'https://www.shudder.com/search?q='],
+  [/britbox/, 'https://www.britbox.com/us/search?q='],
+  [/plex/, 'https://watch.plex.tv/search?q='],
+];
+function watchUrl(provider, title, fallback) {
+  const name = String(provider).toLowerCase();
+  const hit = WATCH_SEARCH.find(([re]) => re.test(name));
+  return hit ? hit[1] + encodeURIComponent(title) : (fallback || `https://www.justwatch.com/us/search?q=${encodeURIComponent(title)}`);
 }
 
 // ---------- Alerts ----------

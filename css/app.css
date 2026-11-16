@@ -293,3 +293,7 @@ section[data-home-row] .section-h{margin-top:18px}
 .list-card .title{font:700 16px var(--display)}
 .lib-card{border-color:var(--accent);margin-top:6px}
 .lib-card .title{color:var(--accent)}
+
+/* Watch on button */
+.watch-btn{display:flex;align-items:center;justify-content:center;gap:10px;margin:0}
+.watch-btn img{width:26px;height:26px;border-radius:6px}
