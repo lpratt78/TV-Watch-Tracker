@@ -1,11 +1,11 @@
 // Movie & Show Tracker: app shell, tabs and screens.
-// Layout mirrors Luke's Book Tracker: Overview, Library, Calendar, Discover, Alerts, Me.
+// Layout mirrors Luke's Book Tracker: Overview, Library, Discover, Alerts, Me.
 import * as store from './store.js';
 import * as T from './tmdb.js';
 import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '0.2.0';
+const APP_VERSION = '0.2.1';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -57,7 +57,6 @@ function cover(t, style = '', size = 'w342') {
     ? '<span class="check" aria-label="Watched"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 8.4l2.6 2.6L12 5.4" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>' : '';
   return `<div class="cover" style="background:${colorFor(t.title)};${style}"><b>${esc(t.title)}</b><i>${esc(typeTxt(t))}</i>${src ? `<img src="${esc(src)}" alt="" loading="lazy">` : ''}${check}</div>`;
 }
-const mini = (t) => `<div class="mini" style="background:${colorFor(t.title)}">${t.poster ? `<img src="${esc(T.img(t.poster, 'w92'))}" alt="" loading="lazy">` : ''}</div>`;
 const stars = (r) => `<span class="stars-row" aria-label="${r} of 5 stars">${[1, 2, 3, 4, 5].map((i) => `<span class="star ${r >= i ? 'on' : ''}">★</span>`).join('')}</span>`;
 const statusTag = (s) => `<span class="status"><span class="dot" style="background:${STATUS[s].color}"></span>${STATUS[s].name}</span>`;
 
@@ -88,7 +87,6 @@ const remember = (t) => { seen.set(`${t.type}:${t.id}`, t); return t; };
 const ICONS = {
   home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 11l8-6.5 8 6.5V20h-5.5v-5.5h-5V20H4z"/></svg>',
   library: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="5.5" width="17" height="12" rx="2"/><path d="M8 20.5h8M10.5 9.5v5l4-2.5z"/></svg>',
-  calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>',
   alerts: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 16V11a6 6 0 0112 0v5l1.5 2h-15zM10 20.5a2 2 0 004 0"/></svg>',
   more: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0114 0"/></svg>',
@@ -96,13 +94,12 @@ const ICONS = {
 const TABS = [
   { id: 'home', label: 'Overview', icon: ICONS.home },
   { id: 'library', label: 'Library', icon: ICONS.library },
-  { id: 'calendar', label: 'Calendar', icon: ICONS.calendar },
   { id: 'discover', label: 'Discover', icon: ICONS.search },
   { id: 'alerts', label: 'Alerts', icon: ICONS.alerts },
   { id: 'me', label: 'Me', icon: ICONS.more },
 ];
-const SCREENS = { home: renderHome, library: renderLibrary, calendar: renderCalendar, discover: renderDiscover, alerts: renderAlerts, me: renderMe, about: renderAbout, title: renderTitle };
-const ALIASES = { lists: 'library', updates: 'alerts', settings: 'me', search: 'discover' };
+const SCREENS = { home: renderHome, library: renderLibrary, discover: renderDiscover, alerts: renderAlerts, me: renderMe, about: renderAbout, title: renderTitle };
+const ALIASES = { lists: 'library', updates: 'alerts', settings: 'me', search: 'discover', calendar: 'alerts' };
 const TAB_OF = { about: 'me', title: null };
 let current = { name: 'home', args: [], query: new URLSearchParams() };
 let activeTab = 'home';
@@ -224,7 +221,7 @@ function renderHome() {
       ${it.rating ? stars(it.rating) : ''}</div></a>`;
   }).join('') : '<p class="author">Nothing on Watching right now. Open a show and set it to Watching to start.</p>';
 
-  body += '<div class="section-h">Coming up <a href="#/calendar">Calendar ›</a></div>';
+  body += '<div class="section-h">Coming up <a href="#/alerts">Alerts ›</a></div>';
   body += upcoming.length ? upcoming.map((e) => `<a class="book-row" href="#/title/${e.itemType}/${e.id}" style="padding:8px 0">${cover({ title: e.title, poster: e.poster, type: e.itemType, id: e.id }, 'width:40px;height:60px;padding:0', 'w154')}
       <div class="meta"><span class="title">${esc(e.title)}</span><span class="author">${esc(e.what)} · ${esc(fmtDate(e.date))}</span></div>
       ${countdown(daysUntil(e.date))}</a>`).join('')
@@ -448,7 +445,7 @@ async function renderTitle(r) {
     <div class="status-pick">${Object.entries(STATUS).map(([k, s]) => `<button data-a="set-status" data-v="${k}" aria-pressed="${it?.status === k}"><span class="dot" style="background:${s.color}"></span>${s.name}</button>`).join('')}</div>
     <div class="label">Your rating</div>
     <div>${[1, 2, 3, 4, 5].map((n) => `<button class="star ${(it?.rating || 0) >= n ? 'on' : ''}" data-a="rate" data-v="${n}" aria-label="${n} star${n > 1 ? 's' : ''}">★</button>`).join('')}</div>
-    ${it ? `<div class="toggle-row" style="margin-top:12px"><div>Follow updates<small>${type === 'tv' ? 'New seasons and episodes show up in Alerts and the Calendar.' : 'The release date shows up in Alerts and the Calendar.'}</small></div><button class="switch" role="switch" aria-checked="${!!it.followed}" aria-label="Follow updates" data-a="follow"></button></div>` : ''}
+    ${it ? `<div class="toggle-row" style="margin-top:12px"><div>Follow updates<small>${type === 'tv' ? 'New seasons and episodes show up in Alerts.' : 'The release date shows up in Alerts.'}</small></div><button class="switch" role="switch" aria-checked="${!!it.followed}" aria-label="Follow updates" data-a="follow"></button></div>` : ''}
 
     ${d.tagline ? `<p class="author" style="margin:16px 0 4px"><i>${esc(d.tagline)}</i></p>` : ''}
     <p style="margin:${d.tagline ? '0' : '16px'} 0 0">${esc(d.overview || 'No overview available.')}</p>
@@ -462,47 +459,6 @@ async function renderTitle(r) {
     ${it ? '<button class="danger-btn" style="margin-top:18px" data-a="remove">Remove from library</button>' : ''}
     <div class="srcnote"><a href="https://www.themoviedb.org/${type}/${id}" target="_blank" rel="noopener">View on TMDB ↗</a></div>`;
   return { top, body };
-}
-
-// ---------- Calendar ----------
-let calMonth = (() => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), 1); })();
-let calSel = localDay();
-Object.assign(actions, {
-  'cal-prev': () => { calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1); redraw(); },
-  'cal-next': () => { calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1); redraw(); },
-  'cal-day': (el) => { calSel = el.dataset.d; redraw(); },
-});
-const legendRow = (e) => `<a class="legend-row" href="#/title/${e.itemType}/${e.id}">${cover({ title: e.title, poster: e.poster, type: e.itemType, id: e.id }, '', 'w92')}<div class="grow"><b>${esc(e.title)}</b><small>${esc(e.what)}${e.date ? ` · ${esc(fmtDate(e.date))}` : ''}</small></div>${e.date ? `<span class="author">${esc(inDays(e.date))}</span>` : ''}</a>`;
-function renderCalendar() {
-  const all = store.getUpdatesCache().entries;
-  const events = all.filter((e) => e.date);
-  const byDay = {};
-  for (const e of events) (byDay[e.date] ||= []).push(e);
-  const y = calMonth.getFullYear(), m = calMonth.getMonth();
-  const first = new Date(y, m, 1).getDay();
-  const days = new Date(y, m + 1, 0).getDate();
-  const todayStr = localDay();
-  const pad = (n) => String(n).padStart(2, '0');
-  let cells = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((w) => `<div class="cal-wd">${w}</div>`).join('');
-  for (let i = 0; i < first; i++) cells += '<div class="cal-day empty"></div>';
-  for (let dnum = 1; dnum <= days; dnum++) {
-    const ds = `${y}-${pad(m + 1)}-${pad(dnum)}`;
-    const ev = byDay[ds] || [];
-    const cls = ['cal-day', ev.length ? 'has' : '', ds === todayStr ? 'today' : '', ds === calSel ? 'sel' : '', ds < todayStr ? 'past' : ''].filter(Boolean).join(' ');
-    cells += `<button class="${cls}" data-a="cal-day" data-d="${ds}" aria-label="${esc(fmtDate(ds))}${ev.length ? `, ${ev.length} event${ev.length > 1 ? 's' : ''}` : ''}"><span class="dn">${dnum}</span>${ev.length ? `<div class="cal-covers">${ev.slice(0, 2).map(mini).join('')}</div>${ev.length > 2 ? `<span class="mark">+${ev.length - 2}</span>` : ''}` : ''}</button>`;
-  }
-  const sel = byDay[calSel] || [];
-  const monthKey = `${y}-${pad(m + 1)}`;
-  const monthEvents = events.filter((e) => e.date.startsWith(monthKey)).sort((a, b) => a.date.localeCompare(b.date));
-  const tba = all.filter((e) => !e.date);
-  const body = `<div class="cal-head"><button data-a="cal-prev" aria-label="Previous month">‹</button><h3>${calMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</h3><button data-a="cal-next" aria-label="Next month">›</button></div>
-    <div class="cal-grid">${cells}</div>
-    <div class="day-info">${sel.length ? sel.map(legendRow).join('') : `<p class="author" style="margin:8px 0">${esc(fmtDate(calSel))}: nothing premieres or releases.</p>`}</div>
-    <div class="section-h">This month</div>
-    ${monthEvents.length ? monthEvents.map(legendRow).join('') : '<p class="author">No premieres or releases for your titles this month.</p>'}
-    ${tba.length ? `<div class="section-h">Announced, no date yet</div>${tba.map(legendRow).join('')}` : ''}
-    <p class="muted-note">Dates come from the movies and shows you follow in your Library.</p>`;
-  return { top: '<h2>Calendar</h2>', body };
 }
 
 // ---------- Alerts ----------
@@ -653,7 +609,7 @@ function renderAbout() {
 
 // ---------- startup ----------
 store.on('library', () => { sync.scheduleSync(); renderNav(); if (['library', 'home'].includes(current.name)) redraw(); });
-store.on('updates', () => { renderNav(); if (['home', 'alerts', 'calendar', 'library'].includes(current.name)) redraw(); });
+store.on('updates', () => { renderNav(); if (['home', 'alerts', 'library'].includes(current.name)) redraw(); });
 store.on('sync', (st) => { const line = $id('sync-line'); if (line) line.textContent = syncLine(st); });
 
 async function startup() {

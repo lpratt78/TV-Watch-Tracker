@@ -2,11 +2,10 @@
 
 A personal movie and TV tracker that installs as an app on iPhone, Android, and Windows (PWA).
 
-Laid out like the Book Tracker app, with six tabs:
+Laid out like the Book Tracker app, with five tabs:
 
 - **Overview**: what you're watching now, countdowns to premieres and releases, and your stats for the year.
 - **Library**: All, Watching, Watchlist and Watched with counts, Movies/Shows filter, sorting, and list or grid view.
-- **Calendar**: a month view of premieres, new episodes and releases for the titles you follow.
 - **Discover**: search, plus trending, popular, coming soon, and a row for each streaming service you pick.
 - **Alerts**: new seasons, premiere dates, new episodes and movie releases, checked each time the app opens. In-app only, with a badge.
 - **Me**: your name, light/dark appearance, streaming services and region, Google Drive backup, backup file, and About.
