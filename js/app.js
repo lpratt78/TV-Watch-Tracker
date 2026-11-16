@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.6.4';
+const APP_VERSION = '0.6.5';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -64,7 +64,43 @@ function runState(status) {
   if (s === 'ended') return 'ended';
   return 'ongoing'; // Returning Series, In Production, Planned, Pilot
 }
-const runOf = (t) => (t.type === 'tv' && t.id ? runState(t.runStatus || store.getShowInfo(t.id)?.status) : null);
+// Status for shows not in the library (Discover, search), looked up once and kept for a week.
+const RUN_CACHE_KEY = 'wt.runStatus';
+const runCache = (() => { try { return JSON.parse(localStorage.getItem(RUN_CACHE_KEY) || '{}'); } catch { return {}; } })();
+const cachedRun = (id) => { const c = runCache[id]; return c && Date.now() - c.t < 7 * 864e5 ? c.s : undefined; };
+const runOf = (t) => (t.type === 'tv' && t.id ? runState(t.runStatus || store.getShowInfo(t.id)?.status || cachedRun(t.id)) : null);
+// Find show cards on screen without a status yet, look them up a few at a time, and color them in place.
+const runQueue = new Set();
+let runBusy = false;
+function fillRunStatus(root = bodyEl) {
+  if (!store.getSettings().tmdbKey) return;
+  root.querySelectorAll('[data-tv]:not([data-run])').forEach((el) => runQueue.add(el.dataset.tv));
+  if (runBusy) return;
+  runBusy = true;
+  (async () => {
+    let saved = 0;
+    const work = async () => {
+      for (const id of runQueue) {
+        runQueue.delete(id);
+        let status = store.getShowInfo(id)?.status || cachedRun(id);
+        if (status === undefined) {
+          try { status = (await T.tvLite(Number(id))).status || ''; runCache[id] = { s: status, t: Date.now() }; saved++; } catch { continue; }
+        }
+        const r = runState(status);
+        document.querySelectorAll(`[data-tv="${id}"]:not([data-run])`).forEach((card) => {
+          card.dataset.run = r || 'none';
+          if (!r) return;
+          card.querySelector('.cover')?.classList.add(`ring-${r}`);
+          card.querySelector('.why, .author')?.insertAdjacentHTML('beforeend', `<span class="run run-${r}" title="${RUN[r].tip}">${RUN[r].name}</span>`);
+        });
+      }
+    };
+    await Promise.all(Array.from({ length: 4 }, work));
+    if (saved) { try { localStorage.setItem(RUN_CACHE_KEY, JSON.stringify(runCache)); } catch { /* ignore */ } }
+    runBusy = false;
+    if (runQueue.size) fillRunStatus();
+  })();
+}
 const runTag = (t) => { const r = runOf(t); return r ? `<span class="run run-${r}" title="${RUN[r].tip}">${RUN[r].name}</span>` : ''; };
 
 function cover(t, style = '', size = 'w342') {
@@ -283,6 +319,7 @@ function renderHome() {
         loadRow(en.target.dataset.homeRow, 1, 'tv').then(({ items }) => {
           const list = notInLibrary(items).filter((t) => t.type === 'tv').slice(0, 20);
           sc.innerHTML = list.length ? list.map(sugCard).join('') : '<p class="author">Nothing new here right now.</p>';
+          fillRunStatus(sc);
         }).catch((e) => { sc.outerHTML = errorBox(e); });
       }
     }, { root: bodyEl, rootMargin: '400px 0px' });
@@ -476,15 +513,17 @@ Object.assign(actions, {
 function sugCard(t) {
   remember(t);
   const lib = store.getItem(t.type, t.id);
-  return `<div class="sug"><a href="#/title/${t.type}/${t.id}" style="display:contents;color:inherit;text-decoration:none">${cover(t)}<span class="t">${esc(t.title)}</span></a>
-    <span class="why">${esc(typeTxt(t))}${t.vote ? ` · ★ ${t.vote.toFixed(1)}` : ''}</span>
+  const known = runOf(t);
+  return `<div class="sug"${t.type === 'tv' ? ` data-tv="${t.id}"${known ? ` data-run="${known}"` : ''}` : ''}><a href="#/title/${t.type}/${t.id}" style="display:contents;color:inherit;text-decoration:none">${cover(t)}<span class="t">${esc(t.title)}</span></a>
+    <span class="why">${esc(typeTxt(t))}${t.vote ? ` · ★ ${t.vote.toFixed(1)}` : ''}${runTag(t)}</span>
     <button class="add ${lib ? 'done' : ''}" data-a="quick-add" data-type="${t.type}" data-id="${t.id}">${lib ? `✓ ${STATUS[lib.status].name}` : '+ Watchlist'}</button></div>`;
 }
 function resultRow(t) {
   remember(t);
   const lib = store.getItem(t.type, t.id);
-  return `<div class="book-row" style="cursor:default"><a href="#/title/${t.type}/${t.id}" style="display:contents;color:inherit;text-decoration:none">${cover(t, '', 'w154')}
-    <div class="meta"><span class="title">${esc(t.title)}</span><span class="author">${esc(typeTxt(t))}${t.vote ? ` · ★ ${t.vote.toFixed(1)}` : ''}</span>
+  const known = runOf(t);
+  return `<div class="book-row" style="cursor:default"${t.type === 'tv' ? ` data-tv="${t.id}"${known ? ` data-run="${known}"` : ''}` : ''}><a href="#/title/${t.type}/${t.id}" style="display:contents;color:inherit;text-decoration:none">${cover(t, '', 'w154')}
+    <div class="meta"><span class="title">${esc(t.title)}</span><span class="author">${esc(typeTxt(t))}${t.vote ? ` · ★ ${t.vote.toFixed(1)}` : ''}${runTag(t)}</span>
     <span class="author" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(t.overview)}</span></div></a>
     <button class="add ${lib ? 'done' : ''}" style="align-self:center" data-a="quick-add" data-type="${t.type}" data-id="${t.id}">${lib ? `✓ ${STATUS[lib.status].name}` : '+ Add'}</button></div>`;
 }
@@ -519,6 +558,7 @@ async function renderDiscover() {
           loadRow(r.key, 1, discType).then(({ items }) => {
             const list = byType(items).slice(0, 20);
             sc.innerHTML = list.length ? list.map(sugCard).join('') : '<p class="author">Nothing here right now.</p>';
+            fillRunStatus(sc);
           }).catch((e) => { sc.outerHTML = errorBox(e); });
         }
       }, { root: bodyEl, rootMargin: '500px 0px' });
@@ -536,6 +576,7 @@ async function renderDiscover() {
           const res = byType(await T.search(term.trim()));
           if (my !== seq) return;
           out.innerHTML = res.length ? `<div class="section-h">Results</div>${res.map(resultRow).join('')}` : `<div class="empty-note">No results for “${esc(term)}”.</div>`;
+          fillRunStatus(out);
         } catch (e) { if (my === seq) out.innerHTML = errorBox(e); }
       }
       input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => run(input.value), 350); });
@@ -626,6 +667,7 @@ async function renderBrowse(r) {
           const fresh = items.filter((t) => (type === 'all' || t.type === type) && !shown.has(`${t.type}:${t.id}`));
           fresh.forEach((t) => shown.add(`${t.type}:${t.id}`));
           grid.insertAdjacentHTML('beforeend', fresh.map(sugCard).join(''));
+          fillRunStatus(grid);
           done = !hasMore;
           more.textContent = done ? `${shown.size} titles` : 'Loading…';
           more.className = done ? 'muted-note' : 'loading';

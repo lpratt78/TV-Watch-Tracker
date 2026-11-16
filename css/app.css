@@ -310,7 +310,7 @@ section[data-home-row] .section-h{margin-top:18px}
 .cover.ring-ongoing{--ring:var(--run-ongoing)}
 .cover.ring-canceled{--ring:var(--run-canceled)}
 .cover.ring-ended{--ring:var(--run-ended)}
-.fan .cover::after,.sug .cover::after{display:none}
+.fan .cover::after{display:none}
 .run{display:inline-block;margin-left:6px;font:600 10.5px var(--body);padding:0 6px;border-radius:5px;vertical-align:1px;color:#fff}
 .run-ongoing{background:var(--run-ongoing)}
 .run-canceled{background:var(--run-canceled)}
