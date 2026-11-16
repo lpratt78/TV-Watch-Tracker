@@ -10,6 +10,7 @@ export class MissingKeyError extends Error {
 
 const memo = new Map();
 const MEMO_MS = 10 * 60 * 1000;
+export const clearMemo = () => memo.clear();
 
 export async function tmdb(path, params = {}, { fresh = false } = {}) {
   const { tmdbKey, language } = getSettings();

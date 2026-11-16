@@ -5,52 +5,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Movie &amp; Show Tracker</title>
   <meta name="description" content="Track movies and shows you want to watch, are watching, and have watched.">
-  <meta name="theme-color" content="#0f1115">
+  <meta name="theme-color" content="#1d6b58" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#12171d" media="(prefers-color-scheme: dark)">
+  <script>try { var t = localStorage.getItem("wt.theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}</script>
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Movie &amp; Show Tracker">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
-  <header class="topbar">
-    <h1 id="page-title">Discover</h1>
-    <div class="topbar-actions">
-      <span id="sync-status" class="sync-status" title="Sync status"></span>
-      <a href="#/settings" class="icon-btn" aria-label="Settings">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm7.43-2.53a7.8 7.8 0 0 0 0-1.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.4 7.4 0 0 0-1.68-.97l-.36-2.54A.5.5 0 0 0 14.13 2h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.6.24-1.17.57-1.68.97l-2.39-.96a.5.5 0 0 0-.6.22L2.84 8.51a.5.5 0 0 0 .12.64l2.03 1.58a7.8 7.8 0 0 0 0 1.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.3.6.22l2.39-.96c.51.4 1.08.73 1.68.97l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.6-.24 1.17-.57 1.68-.97l2.39.96c.22.08.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58Z"/></svg>
-      </a>
-    </div>
-  </header>
+  <div class="app" id="app">
+    <div class="p-top" id="top"></div>
+    <main class="p-body" id="body" tabindex="-1"></main>
+    <nav class="p-nav" id="nav" aria-label="App sections"></nav>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
-  <main id="view" tabindex="-1"></main>
-
-  <nav class="tabbar" aria-label="Main">
-    <a href="#/discover" data-tab="discover">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm3.5 6.5-2 5-5 2 2-5 5-2Z"/></svg>
-      <span>Discover</span>
-    </a>
-    <a href="#/search" data-tab="search">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 3a7 7 0 1 0 4.2 12.6l4.6 4.6 1.4-1.4-4.6-4.6A7 7 0 0 0 10 3Zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10Z"/></svg>
-      <span>Search</span>
-    </a>
-    <a href="#/lists" data-tab="lists">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v2H4V5Zm0 6h16v2H4v-2Zm0 6h10v2H4v-2Z"/></svg>
-      <span>My Lists</span>
-    </a>
-    <a href="#/updates" data-tab="updates">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22Zm7-6V11a7 7 0 0 0-5.5-6.84V3.5a1.5 1.5 0 0 0-3 0v.66A7 7 0 0 0 5 11v5l-2 2v1h18v-1l-2-2Z"/></svg>
-      <span>Updates</span>
-      <b id="updates-badge" class="badge" hidden></b>
-    </a>
-  </nav>
-
-  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-
-  <!-- Optional, git-ignored: copy config.example.js to config.js to preset keys. -->
+  <!-- Built-in keys for this deployment. -->
   <script src="config.js"></script>
   <script type="module" src="js/app.js"></script>
 </body>

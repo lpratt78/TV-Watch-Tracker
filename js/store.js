@@ -12,6 +12,7 @@ const DEFAULT_SETTINGS = {
   language: 'en-US',
   services: null,       // null = default rows (KNOWN_SERVICES in tmdb.js); otherwise TMDB provider IDs.
   autoSync: false,      // Set true once the user signs in with Google.
+  name: '',             // Shown on the Me screen.
 };
 
 function read(key, fallback) {
@@ -91,6 +92,9 @@ export function upsertItem(base, patch) {
     ...patch,
     updatedAt: now,
   };
+  // Remember when something was finished, for the yearly count on Overview.
+  if (item.status === 'watched' && existing?.status !== 'watched' && !patch.watchedAt) item.watchedAt = now;
+  if (item.status === 'watching' && existing?.status !== 'watching') item.startedAt = now;
   delete item.deleted;
   lib.items[key] = item;
   lib.updatedAt = now;
