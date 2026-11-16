@@ -316,3 +316,6 @@ section[data-home-row] .section-h{margin-top:18px}
 .run-canceled{background:var(--run-canceled)}
 .run-ended{background:var(--run-ended)}
 .series .run{margin-left:0}
+
+.sum .wide{grid-column:1 / -1}
+.sug .why .run{display:table;margin:3px 0 0}

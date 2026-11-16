@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.6.2';
+const APP_VERSION = '0.6.3';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -297,8 +297,6 @@ function renderHome() {
   const watching = store.listItems('watching');
   const watchlist = store.listItems('watchlist');
   const watchedYear = store.listItems('watched').filter((i) => new Date(i.watchedAt || i.updatedAt).getFullYear() === y);
-  const rated = all.filter((i) => i.rating);
-  const avg = rated.length ? (rated.reduce((s, i) => s + i.rating, 0) / rated.length).toFixed(1) : null;
   const upcoming = store.getUpdatesCache().entries.filter((e) => e.upcoming);
 
   // Watching now: one stacked card that opens into a card per title.
@@ -325,17 +323,46 @@ function renderHome() {
       <span class="meta"><span class="title">${esc(e.title)}</span><span class="author">${esc(e.what)}</span><span class="series">${esc(fmtDate(e.date))}</span></span>${countdown(daysUntil(e.date))}</a>`).join('')}</div></div>`
     : '<p class="author">No premieres or release dates coming up for your titles yet. The app checks every time it opens.</p>';
 
+  const tw = timeWatched(all);
+  const leftMins = watching.reduce((n, it) => n + (showProgress(it)?.mins || 0), 0);
   body += `<div class="section-h">${y} so far</div><div class="sum">
     <div><b>${watchedYear.length}</b><span>Watched in ${y}</span></div>
     <div><b>${watching.length}</b><span>Watching now</span></div>
     <div><b>${watchlist.length}</b><span>On your Watchlist</span></div>
-    <div><b>${avg ? `★ ${avg}` : '–'}</b><span>Your average rating</span></div></div>`;
+    <div><b id="time-watched">${fmtTime(tw.mins) || '–'}</b><span>Total time watched${tw.pending ? ' (adding up…)' : ''}</span></div>
+    <div class="wide"><b>${fmtTime(leftMins) || '–'}</b><span>Left to watch on the shows you're watching</span></div></div>`;
 
   if (watchlist.length) {
-    body += '<div class="section-h">Up next <a href="#/library">Library ›</a></div>' + watchlist.slice(0, 3).map((it) => `<a class="book-row" href="#/title/${it.type}/${it.id}" style="border-bottom:0;padding-top:4px">${cover(it, 'width:40px;height:60px;padding:0', 'w154')}<div class="meta"><span class="title">${esc(it.title)}</span><span class="series">${esc(typeTxt(it))}</span></div></a>`).join('');
+    body += '<div class="section-h">Up next <a href="#/library">Library ›</a></div>' + `<div class="shelf-scroll">${watchlist.map((it) => `<a class="sug" href="#/title/${it.type}/${it.id}">${cover(it, '', 'w342')}<span class="t">${esc(it.title)}</span><span class="why">${esc(typeTxt(it))}${runTag(it)}</span></a>`).join('')}</div>`;
   }
   body += rowsHtml;
-  return { top, body, after: () => { autoScroll($('#coming')); loadRows(); } };
+  return { top, body, after: () => { autoScroll($('#coming')); loadRows(); if (tw.pending) fetchMovieRuntimes(); } };
+}
+
+// Total time watched: episodes watched times each show's episode length, plus watched movies' run times.
+const MOVIE_RT_KEY = 'wt.movieRuntime';
+const movieRuntimes = () => { try { return JSON.parse(localStorage.getItem(MOVIE_RT_KEY) || '{}'); } catch { return {}; } };
+function timeWatched(all) {
+  const rt = movieRuntimes();
+  let mins = 0, pending = false;
+  for (const it of all) {
+    if (it.type === 'tv') { const p = showProgress(it); const info = store.getShowInfo(it.id); if (p && info?.runtime) mins += p.seen * info.runtime; }
+    else if (it.status === 'watched') { if (rt[it.id] === undefined) pending = true; else mins += rt[it.id]; }
+  }
+  return { mins, pending: pending && !!store.getSettings().tmdbKey };
+}
+let fetchingRuntimes = false;
+async function fetchMovieRuntimes() {
+  if (fetchingRuntimes) return; // once per app open, so being offline can't loop
+  fetchingRuntimes = true;
+  const rt = movieRuntimes();
+  const todo = store.listItems('watched').filter((i) => i.type === 'movie' && rt[i.id] === undefined);
+  let i = 0;
+  await Promise.all(Array.from({ length: 4 }, async () => {
+    while (i < todo.length) { const it = todo[i++]; try { rt[it.id] = (await T.movieLite(it.id)).runtime || 0; } catch { /* try again next time */ } }
+  }));
+  try { localStorage.setItem(MOVIE_RT_KEY, JSON.stringify(rt)); } catch { /* ignore */ }
+  if (current.name === 'home') redraw();
 }
 
 // Slowly scroll a row sideways on its own, looping. Pauses while you touch it.
