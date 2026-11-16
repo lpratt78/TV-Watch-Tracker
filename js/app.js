@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.8.4';
+const APP_VERSION = '0.8.5';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -195,9 +195,9 @@ const TABS = [
   { id: 'alerts', label: 'Alerts', icon: ICONS.alerts },
   { id: 'me', label: 'Me', icon: ICONS.more },
 ];
-const SCREENS = { home: renderHome, library: renderLibrary, discover: renderDiscover, alerts: renderAlerts, me: renderMe, about: renderAbout, title: renderTitle, season: renderSeason, browse: renderBrowse, mylists: renderMyLists, lists: renderLists, list: renderLibrary, services: renderServices, service: renderLibrary, pickservices: renderPickServices };
+const SCREENS = { home: renderHome, library: renderLibrary, discover: renderDiscover, alerts: renderAlerts, me: renderMe, about: renderAbout, title: renderTitle, season: renderSeason, browse: renderBrowse, mylists: renderMyLists, lists: renderLists, list: renderLibrary, services: renderServices, service: renderLibrary, pickservices: renderPickServices, top: renderTop };
 const ALIASES = { updates: 'alerts', settings: 'me', search: 'discover', calendar: 'alerts' };
-const TAB_OF = { about: 'me', title: null, season: null, browse: 'discover', mylists: 'lists', list: 'lists', library: 'lists', service: 'services', pickservices: 'me' };
+const TAB_OF = { about: 'me', title: null, season: null, browse: 'discover', mylists: 'lists', list: 'lists', library: 'lists', service: 'services', pickservices: 'me', top: 'discover' };
 let current = { name: 'home', args: [], query: new URLSearchParams() };
 let activeTab = 'home';
 
@@ -631,7 +631,7 @@ async function renderDiscover() {
 
   let rows;
   if (pick) {
-    rows = await serviceRows(pick, { genre });
+    rows = [{ rank: true, title: `Top 50 on ${pick.name}`, provider: (pick.ids || [pick.id]).join('|'), svcName: pick.name, genre }, ...await serviceRows(pick, { genre })];
   } else {
     // Every streaming service gets a row: yours first (picked under Me), then the rest.
     let services = [...mine];
@@ -643,6 +643,7 @@ async function renderDiscover() {
       .map((key) => ({ key, ...rowSpec(key, services) }))
       .filter((r) => !r.type || discType === 'all' || r.type === discType)
       .map((r) => ({ ...r, genre, title: genre && !r.provider ? `${r.title} · ${genre.name}` : r.title }));
+    rows.unshift({ rank: true, title: genre ? `Top 50 · ${genre.name}` : 'Top 50', genre });
   }
   const body = `${head}${svcPick}${genreChips}<div id="results"></div><div id="rows">${rowsHtml(rows, discType)}</div>`;
 
@@ -707,8 +708,15 @@ function rowQs(r, type) {
   if (r.top || r.fresh || r.custom) q.set('t', r.title);
   const x = q.toString(); return x ? `?${x}` : '';
 }
+function topHref(r, type) {
+  const q = new URLSearchParams();
+  if (type !== 'all') q.set('type', type);
+  if (r.genre) q.set('genre', r.genre.name);
+  if (r.provider) { q.set('p', r.provider); q.set('n', r.svcName || ''); }
+  const x = q.toString(); return `#/top${x ? `?${x}` : ''}`;
+}
 function rowsHtml(rows, type) {
-  return rows.map((r, i) => `<section data-row="${i}"><div class="section-h"><span>${r.logo ? `<img src="${esc(T.img(r.logo, 'w92'))}" alt="">` : ''}${esc(r.title)}</span><a href="#/browse/${r.key}${rowQs(r, type)}">See all ›</a></div>
+  return rows.map((r, i) => `<section data-row="${i}"><div class="section-h"><span>${r.logo ? `<img src="${esc(T.img(r.logo, 'w92'))}" alt="">` : ''}${esc(r.title)}</span>${r.rank ? `<a href="${topHref(r, type)}">Show top 100 ›</a>` : `<a href="#/browse/${r.key}${rowQs(r, type)}">See all ›</a>`}</div>
     <div class="shelf-scroll">${skeletonRow()}</div></section>`).join('');
 }
 // Fill each row as it scrolls near the screen.
@@ -719,6 +727,13 @@ function wireRows(rows, type) {
       io.unobserve(en.target);
       const r = rows[Number(en.target.dataset.row)];
       const sc = en.target.querySelector('.shelf-scroll');
+      if (r.rank) {
+        topList(50, type, r.genre, r.provider).then((items) => {
+          sc.innerHTML = items.length ? items.map(rankCard).join('') + `<a class="sug more-card" href="${topHref(r, type)}"><span class="cover"><b>Show top 100</b><span>›</span></span></a>` : `<p class="author">Nothing here${r.genre ? ` in ${esc(r.genre.name)}` : ''} right now.</p>`;
+          fillRunStatus(sc);
+        }).catch((e) => { sc.outerHTML = errorBox(e); });
+        continue;
+      }
       loadRow(r.key, 1, type, r.genre, r.top ? TOP : {}).then(({ items }) => {
         let list = items.filter((t) => type === 'all' || t.type === type);
         if (r.fresh) list = notInLibrary(list);
@@ -730,6 +745,57 @@ function wireRows(rows, type) {
   }, { root: bodyEl, rootMargin: '500px 0px' });
   $$('[data-row]').forEach((el) => io.observe(el));
 }
+// The best-rated titles, highest first: movies and shows merged, following the type, genre and service filters.
+async function topList(n, type = 'all', genre = null, provider = '') {
+  const region = store.getSettings().region;
+  const types = (type === 'all' ? ['movie', 'tv'] : [type]).filter((t) => !genre || (genre[t] || []).length);
+  const lists = await Promise.all(types.map(async (t) => {
+    const out = [];
+    const minVotes = provider || genre ? (t === 'movie' ? 800 : 250) : (t === 'movie' ? 2000 : 600);
+    for (let page = 1; out.length < n && page <= Math.ceil(n / 20); page++) {
+      const d = await T.tmdb(`/discover/${t}`, {
+        sort_by: 'vote_average.desc', 'vote_count.gte': minVotes, with_genres: genre ? (genre[t] || []).join('|') : '',
+        // Talk, news and soap shows rank oddly on votes alone.
+        without_genres: t === 'tv' ? '10767,10763,10766' : '',
+        ...(provider ? { with_watch_providers: provider, watch_region: region, with_watch_monetization_types: 'flatrate|free|ads' } : {}),
+        page,
+      });
+      out.push(...(d.results || []).map((r) => T.norm(r, t)));
+      if (page >= (d.total_pages || 1)) break;
+    }
+    return out;
+  }));
+  const seen = new Set();
+  return lists.flat().filter((t) => !seen.has(`${t.type}:${t.id}`) && seen.add(`${t.type}:${t.id}`)).sort((a, b) => (b.vote || 0) - (a.vote || 0)).slice(0, n);
+}
+const rankCard = (t, i) => sugCard(t).replace('<div class="sug"', `<div class="sug ranked" data-rank="${i + 1}"`);
+
+// Top 100: the full ranked list.
+async function renderTop(r) {
+  const head = (t) => `<button class="icon-btn" data-a="back">‹ Back</button><h2>${esc(t)}</h2>`;
+  try { await loadGenres(); } catch { /* ignore */ }
+  const type = ['movie', 'tv'].includes(r.query.get('type')) ? r.query.get('type') : 'all';
+  const genre = genreFromQuery(r.query.get('genre'));
+  const provider = r.query.get('p') || '';
+  const svcName = r.query.get('n') || '';
+  const what = type === 'movie' ? 'movies' : type === 'tv' ? 'shows' : 'movies and shows';
+  const title = `Top 100${svcName ? ` on ${svcName}` : ''}`;
+  const sub = `The best-rated ${genre ? `${genre.name} ` : ''}${what}${svcName ? ` streaming on ${svcName}` : ''}, by TMDB rating.`;
+  return {
+    top: head(title),
+    body: `<p class="author" style="margin:0 0 10px">${esc(sub)}</p><div class="grid browse ranked-grid" id="top100"></div><div id="top-more" class="loading">Loading…</div>`,
+    after: async () => {
+      try {
+        const items = await topList(100, type, genre, provider);
+        const grid = $id('top100'); if (!grid) return;
+        grid.innerHTML = items.map(rankCard).join('');
+        fillRunStatus(grid);
+        $id('top-more').outerHTML = items.length ? '' : '<div class="empty-note">Nothing matches those filters right now.</div>';
+      } catch (e) { const m = $id('top-more'); if (m) m.outerHTML = errorBox(e); }
+    },
+  };
+}
+
 // Several genres as one ("any of these").
 const comboGenre = (gs) => (gs.length === 1 ? gs[0] : { name: gs.map((g) => g.name).join(', '), movie: [...new Set(gs.flatMap((g) => g.movie))], tv: [...new Set(gs.flatMap((g) => g.tv))] });
 const genreFromQuery = (v) => { const gs = String(v || '').split(/,\s*/).map(genreByName).filter(Boolean); return gs.length ? comboGenre(gs) : null; };

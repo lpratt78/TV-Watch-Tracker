@@ -391,3 +391,12 @@ section[data-home-row] .section-h{margin-top:18px}
 .svc-explore{margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
 .svc-explore h3{margin:0;font:700 18px var(--display)}
 .svc-explore>.author{margin:2px 0 6px}
+
+/* Top 50 / Top 100 */
+.sug.ranked{position:relative}
+.sug.ranked::before{content:attr(data-rank);position:absolute;top:6px;left:6px;z-index:2;min-width:26px;height:26px;padding:0 6px;border-radius:999px;background:rgba(0,0,0,.78);color:#fff;font:700 13px/26px var(--display);text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.35)}
+.sug.ranked[data-rank="1"]::before,.sug.ranked[data-rank="2"]::before,.sug.ranked[data-rank="3"]::before{background:var(--accent)}
+.more-card .cover{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:var(--panel);border:1px dashed var(--accent);border-radius:10px;color:var(--accent);text-align:center;padding:10px}
+.more-card .cover b{font:700 15px var(--display)}
+.more-card .cover span{font:700 26px var(--display)}
+.more-card{text-decoration:none}
