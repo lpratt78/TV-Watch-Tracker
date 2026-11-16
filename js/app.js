@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.4.0';
+const APP_VERSION = '0.5.0';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -119,19 +119,21 @@ const ICONS = {
   home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 11l8-6.5 8 6.5V20h-5.5v-5.5h-5V20H4z"/></svg>',
   library: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="5.5" width="17" height="12" rx="2"/><path d="M8 20.5h8M10.5 9.5v5l4-2.5z"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>',
+  lists: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M8 9h8M8 12.5h8M8 16h5"/></svg>',
   alerts: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 16V11a6 6 0 0112 0v5l1.5 2h-15zM10 20.5a2 2 0 004 0"/></svg>',
   more: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0114 0"/></svg>',
 };
 const TABS = [
   { id: 'home', label: 'Overview', icon: ICONS.home },
   { id: 'library', label: 'Library', icon: ICONS.library },
+  { id: 'lists', label: 'Lists', icon: ICONS.lists },
   { id: 'discover', label: 'Discover', icon: ICONS.search },
   { id: 'alerts', label: 'Alerts', icon: ICONS.alerts },
   { id: 'me', label: 'Me', icon: ICONS.more },
 ];
-const SCREENS = { home: renderHome, library: renderLibrary, discover: renderDiscover, alerts: renderAlerts, me: renderMe, about: renderAbout, title: renderTitle, season: renderSeason, browse: renderBrowse, mylists: renderMyLists };
-const ALIASES = { lists: 'library', updates: 'alerts', settings: 'me', search: 'discover', calendar: 'alerts' };
-const TAB_OF = { about: 'me', title: null, season: null, browse: 'discover', mylists: 'library' };
+const SCREENS = { home: renderHome, library: renderLibrary, discover: renderDiscover, alerts: renderAlerts, me: renderMe, about: renderAbout, title: renderTitle, season: renderSeason, browse: renderBrowse, mylists: renderMyLists, lists: renderLists, list: renderLibrary };
+const ALIASES = { updates: 'alerts', settings: 'me', search: 'discover', calendar: 'alerts' };
+const TAB_OF = { about: 'me', title: null, season: null, browse: 'discover', mylists: 'lists', list: 'lists' };
 let current = { name: 'home', args: [], query: new URLSearchParams() };
 let activeTab = 'home';
 
@@ -352,18 +354,27 @@ function libRow(it) {
     ${it.rating ? stars(it.rating) : ''}
     ${it.type === 'tv' && it.status !== 'watchlist' ? progressHtml(it) : ''}
     ${it.status === 'watched' && it.watchedAt ? `<span class="series">Watched ${new Date(it.watchedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>` : ''}
-    ${it.followed ? indicators(it.type, it.id) : ''}</div></a>`;
+    ${it.followed ? indicators(it.type, it.id) : ''}</div>${pctHtml(it)}</a>`;
+}
+// Percent of the series watched, shown on the right of a show card.
+function pctHtml(it) {
+  const p = it.type === 'tv' ? showProgress(it) : null;
+  if (!p?.aired) return '';
+  const n = Math.round((p.seen / p.aired) * 100);
+  return `<span class="pct ${n >= 100 ? 'done' : ''}"><b>${n}%</b><span>complete</span></span>`;
 }
 function libCell(it) {
   return `<a class="gcell" href="#/title/${it.type}/${it.id}">${cover(it, '', 'w342')}<span class="t">${esc(it.title)}</span>
     <span class="st">${it.rating ? stars(it.rating) : statusTag(it.status)}</span></a>`;
 }
 
-function renderLibrary() {
-  const top = '<h2>Library</h2><a class="plus-btn" href="#/discover" aria-label="Add a movie or show">+</a>';
-  const listNames = store.listNames();
-  if (libState.list && !listNames.includes(libState.list)) libState.list = '';
-  const all = store.listItems().filter((i) => (libState.type === 'all' || i.type === libState.type) && (!libState.list || (i.lists || []).includes(libState.list)));
+function renderLibrary(r) {
+  const listName = r?.name === 'list' ? decodeURIComponent(r.args[0] || '') : '';
+  if (listName && !store.listNames().includes(listName)) { location.hash = '#/lists'; return {}; }
+  const top = listName
+    ? `<button class="icon-btn" data-a="back">‹ Lists</button><h2>${esc(listName)}</h2>`
+    : '<h2>Library</h2><a class="plus-btn" href="#/discover" aria-label="Add a movie or show">+</a>';
+  const all = store.listItems().filter((i) => (libState.type === 'all' || i.type === libState.type) && (!listName || (i.lists || []).includes(listName)));
   const counts = { all: all.length };
   for (const k of Object.keys(STATUS)) counts[k] = all.filter((i) => i.status === k).length;
   const sorters = {
@@ -379,13 +390,14 @@ function renderLibrary() {
     <div class="toolbar">
       <div class="seg" role="group" aria-label="Type">${[['all', 'All'], ['movie', 'Movies'], ['tv', 'Shows']].map(([k, l]) => `<button data-a="lib-type" data-v="${k}" aria-pressed="${libState.type === k}">${l}</button>`).join('')}</div>
       <span class="grow"></span>
-      <select id="lib-list" aria-label="List"><option value="">All lists</option>${listNames.map((n) => `<option ${libState.list === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}<option value="__manage">${listNames.length ? 'Edit lists…' : 'Make a list…'}</option></select>
       <select id="lib-sort" aria-label="Sort">${[['recent', 'Recent'], ['title', 'Title'], ['rating', 'Rating'], ['year', 'Year']].map(([k, l]) => `<option value="${k}" ${libState.sort === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <div class="seg" role="group" aria-label="View"><button data-a="lib-view" data-v="list" aria-pressed="${libState.view === 'list'}" aria-label="List">☰</button><button data-a="lib-view" data-v="grid" aria-pressed="${libState.view === 'grid'}" aria-label="Grid">▦</button></div>
     </div>`;
 
   if (!list.length) {
-    body += `<div class="empty-state"><p>${libState.shelf === 'all' ? 'Nothing here yet.' : `Nothing on ${STATUS[libState.shelf].name} yet.`}</p><a class="ghost-btn" href="#/discover">Find something to watch</a></div>`;
+    body += listName
+      ? `<div class="empty-state"><p>${libState.shelf === 'all' ? `Nothing on ${esc(listName)} yet.` : `Nothing on ${esc(listName)} is on ${STATUS[libState.shelf].name}.`} Open any show or movie and tap the list name to add it.</p></div>`
+      : `<div class="empty-state"><p>${libState.shelf === 'all' ? 'Nothing here yet.' : `Nothing on ${STATUS[libState.shelf].name} yet.`}</p><a class="ghost-btn" href="#/discover">Find something to watch</a></div>`;
   } else if (libState.view === 'grid') {
     body += `<div class="grid" style="margin-top:8px">${list.map(libCell).join('')}</div>`;
   } else if (libState.shelf === 'all') {
@@ -396,7 +408,7 @@ function renderLibrary() {
   } else {
     body += list.map(libRow).join('');
   }
-  return { top, body, after: () => { $('#lib-sort')?.addEventListener('change', (e) => { libState.sort = e.target.value; saveLib(); redraw(); }); $('#lib-list')?.addEventListener('change', (e) => { if (e.target.value === '__manage') { location.hash = '#/mylists'; return; } libState.list = e.target.value; saveLib(); redraw(); }); } };
+  return { top, body, after: () => { $('#lib-sort')?.addEventListener('change', (e) => { libState.sort = e.target.value; saveLib(); redraw(); }); } };
 }
 
 // ---------- Discover ----------
@@ -739,11 +751,11 @@ async function renderSeason(r) {
 let renaming = null;
 let confirmDelete = null;
 Object.assign(actions, {
-  'mylist-open': (el) => { libState.list = el.dataset.v; libState.shelf = 'all'; libState.type = 'all'; saveLib(); location.hash = '#/library'; },
+  'mylist-open': (el) => { location.hash = `#/list/${encodeURIComponent(el.dataset.v)}`; },
   'mylist-create': () => { try { store.createList($('#ml-new').value); toast('List created'); } catch (e) { toast(e.message); } redraw(); },
   'mylist-rename': (el) => { renaming = el.dataset.v; confirmDelete = null; redraw().then(() => $('#ml-rename')?.focus()); },
   'mylist-save': () => {
-    try { store.renameList(renaming, $('#ml-rename').value); if (libState.list === renaming) { libState.list = $('#ml-rename').value.trim(); saveLib(); } renaming = null; } catch (e) { toast(e.message); }
+    try { store.renameList(renaming, $('#ml-rename').value); renaming = null; } catch (e) { toast(e.message); }
     redraw();
   },
   'mylist-cancel': () => { renaming = null; confirmDelete = null; redraw(); },
@@ -755,7 +767,7 @@ Object.assign(actions, {
 function renderMyLists() {
   const names = store.listNames();
   const items = store.listItems();
-  const top = '<button class="icon-btn" data-a="back">‹ Library</button><h2>Your lists</h2>';
+  const top = '<button class="icon-btn" data-a="back">‹ Lists</button><h2>Edit lists</h2>';
   const body = `<p class="author" style="margin:0 0 10px">Make as many lists as you like, such as one for you, one for your wife, and one you watch together. A title can be on more than one list. Add titles from each title's page.</p>
     <div class="card"><h3>New list</h3><div class="name-edit"><input id="ml-new" placeholder="List name" style="flex:1;width:auto"><button class="text-btn" data-a="mylist-create">Create</button></div></div>
     ${names.length ? names.map((n) => {
@@ -771,6 +783,29 @@ function renderMyLists() {
     $('#ml-new')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') actions['mylist-create'](); });
     $('#ml-rename')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') actions['mylist-save'](); if (e.key === 'Escape') actions['mylist-cancel'](); });
   } };
+}
+
+// ---------- Lists tab: a card for each list ----------
+function renderLists() {
+  const names = store.listNames();
+  const items = store.listItems();
+  const top = `<h2>Lists</h2>${names.length ? '<a class="icon-btn" href="#/mylists">Edit</a>' : ''}<a class="plus-btn" href="#/mylists" aria-label="New list">+</a>`;
+  if (!names.length) {
+    return { top, body: `<div class="empty-state"><h3>No lists yet</h3><p>Make lists for anything you like, such as one for you, one for your wife, and one you watch together.</p><a class="primary" href="#/mylists">Make a list</a></div>` };
+  }
+  const body = `<div class="list-cards">${names.map((n) => {
+    const on = items.filter((i) => i.lists?.includes(n));
+    const shows = on.filter((i) => i.type === 'tv').length;
+    const watching = on.filter((i) => i.status === 'watching').length;
+    const toWatch = on.filter((i) => i.status === 'watchlist').length;
+    return `<a class="list-card" href="#/list/${encodeURIComponent(n)}">
+      <span class="fan">${on.length ? on.slice(0, 4).map((it, i) => cover(it, `--i:${i}`, 'w154')).join('') : '<span class="cover empty-cover" style="--i:0"></span>'}</span>
+      <span class="meta"><span class="title">${esc(n)}</span>
+        <span class="author">${shows} show${shows === 1 ? '' : 's'} · ${on.length - shows} movie${on.length - shows === 1 ? '' : 's'}</span>
+        ${on.length ? `<span class="series">${watching} watching · ${toWatch} to watch</span>` : '<span class="series">Empty</span>'}</span>
+      <span class="chev" aria-hidden="true">›</span></a>`;
+  }).join('')}</div>`;
+  return { top, body };
 }
 
 // ---------- Alerts ----------
@@ -983,7 +1018,7 @@ function renderAbout() {
 }
 
 // ---------- startup ----------
-store.on('library', () => { sync.scheduleSync(); renderNav(); if (['library', 'home'].includes(current.name)) redraw(); });
+store.on('library', () => { sync.scheduleSync(); renderNav(); if (['library', 'home', 'lists', 'list'].includes(current.name)) redraw(); });
 store.on('updates', () => { renderNav(); if (['home', 'alerts', 'library'].includes(current.name)) redraw(); });
 store.on('sync', (st) => { const line = $id('sync-line'); if (line) line.textContent = syncLine(st); });
 
