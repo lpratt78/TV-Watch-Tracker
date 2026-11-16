@@ -3,7 +3,7 @@ import * as T from './tmdb.js';
 import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 
-const APP_VERSION = '0.1.1';
+const APP_VERSION = '0.1.2';
 const view = document.getElementById('view');
 const titleEl = document.getElementById('page-title');
 
@@ -343,10 +343,10 @@ async function renderSettings() {
   if (s.googleClientId) sync.preload();
   view.innerHTML = `
     <form class="panel" id="tmdb-form" autocomplete="off">
-      <h2>TMDB</h2>
-      <label class="field"><span>API key (v3) or read access token</span>
+      <h2>${store.builtIn.tmdb ? 'Region' : 'TMDB'}</h2>
+      ${store.builtIn.tmdb ? '' : `<label class="field"><span>API key (v3) or read access token</span>
         <input type="password" id="tmdbKey" value="${esc(s.tmdbKey)}" placeholder="Paste your key" spellcheck="false"></label>
-      <p class="muted small">Get one free at <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">themoviedb.org/settings/api</a>. It's saved only on this device.</p>
+      <p class="muted small">Get one free at <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">themoviedb.org/settings/api</a>. It's saved only on this device.</p>`}
       <label class="field"><span>Region for streaming availability</span>
         <input type="text" id="region" value="${esc(s.region)}" maxlength="2" style="text-transform:uppercase;width:90px"></label>
       <button class="btn primary" type="submit">Save</button>
@@ -360,10 +360,10 @@ async function renderSettings() {
     <form class="panel" id="google-form" autocomplete="off">
       <h2>Google Drive sync</h2>
       <p class="muted small">Your lists are saved on this device and backed up to a private app folder in your Google Drive, so they follow you between phone and PC.</p>
-      <label class="field"><span>OAuth client ID</span>
-        <input type="text" id="googleClientId" value="${esc(s.googleClientId)}" placeholder="xxxx.apps.googleusercontent.com" spellcheck="false"></label>
+      ${store.builtIn.google ? '' : `<label class="field"><span>OAuth client ID</span>
+        <input type="text" id="googleClientId" value="${esc(s.googleClientId)}" placeholder="xxxx.apps.googleusercontent.com" spellcheck="false"></label>`}
       <div class="btn-row">
-        <button class="btn" type="submit">Save client ID</button>
+        ${store.builtIn.google ? '' : '<button class="btn" type="submit">Save client ID</button>'}
         ${sync.isSignedIn()
           ? `<button class="btn primary" type="button" id="sync-now">Sync now</button><button class="btn danger" type="button" id="sign-out">Sign out</button>`
           : `<button class="btn primary" type="button" id="sign-in" ${s.googleClientId ? '' : 'disabled'}>Sign in with Google</button>`}
@@ -381,13 +381,14 @@ async function renderSettings() {
   $('#tmdb-form').addEventListener('submit', (e) => {
     e.preventDefault();
     const region = $('#region').value.trim().toUpperCase() || 'US';
-    store.saveSettings({ tmdbKey: $('#tmdbKey').value.trim(), region });
+    store.saveSettings($('#tmdbKey') ? { tmdbKey: $('#tmdbKey').value.trim(), region } : { region });
     T.clearProviderCache();
     toast('Saved');
     renderSettings();
   });
   $('#google-form').addEventListener('submit', (e) => {
     e.preventDefault();
+    if (!$('#googleClientId')) return;
     store.saveSettings({ googleClientId: $('#googleClientId').value.trim() });
     toast('Saved');
     renderSettings();

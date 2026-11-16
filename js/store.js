@@ -26,15 +26,16 @@ function write(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { console.warn('Storage write failed', e); }
 }
 
-// Optional config.js can set window.WT_CONFIG = { tmdbKey, googleClientId } for a
-// personal deployment. It is git-ignored so keys never get committed.
+// config.js can set window.WT_CONFIG = { tmdbKey, googleClientId } for a deployment.
+// Keys built in there take priority and hide their fields in Settings.
 const fileConfig = (typeof window !== 'undefined' && window.WT_CONFIG) || {};
+export const builtIn = { tmdb: !!fileConfig.tmdbKey, google: !!fileConfig.googleClientId };
 
 export function getSettings() {
   const saved = read(SETTINGS_KEY, {});
   const s = { ...DEFAULT_SETTINGS, ...saved };
-  if (!s.tmdbKey && fileConfig.tmdbKey) s.tmdbKey = fileConfig.tmdbKey;
-  if (!s.googleClientId && fileConfig.googleClientId) s.googleClientId = fileConfig.googleClientId;
+  if (fileConfig.tmdbKey) s.tmdbKey = fileConfig.tmdbKey;
+  if (fileConfig.googleClientId) s.googleClientId = fileConfig.googleClientId;
   return s;
 }
 export function saveSettings(patch) {
