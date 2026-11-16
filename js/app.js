@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.8.5';
+const APP_VERSION = '0.8.6';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -1637,6 +1637,10 @@ store.on('sync', (st) => { const line = $id('sync-line'); if (line) line.textCon
 async function startup() {
   applyTheme(currentTheme());
   matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => applyTheme(currentTheme()));
+  // The app always opens on Overview, except right after an update reload.
+  let updating = false;
+  try { updating = sessionStorage.getItem('wt.updReload') === '1'; sessionStorage.removeItem('wt.updReload'); } catch { /* ignore */ }
+  if (!updating && location.hash !== '#/home') history.replaceState(null, '', '#/home');
   await route();
   if (sync.isSignedIn() && sync.hasValidToken()) {
     try { await sync.syncNow(); } catch (e) { console.warn('Sync failed', e); }
@@ -1647,14 +1651,19 @@ async function startup() {
   }
 }
 window.addEventListener('online', () => { if (sync.isSignedIn()) sync.syncNow().catch(() => {}); });
+// Coming back after 30 minutes or more away also starts on Overview (phones keep the app open in the background).
+let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && store.getSettings().tmdbKey) checkUpdates().catch(() => {});
+  if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return; }
+  if (hiddenAt && Date.now() - hiddenAt > 30 * 60e3 && location.hash !== '#/home') location.hash = '#/home';
+  hiddenAt = 0;
+  if (store.getSettings().tmdbKey) checkUpdates().catch(() => {});
 });
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW failed', e)));
   // When a new version takes over, reload once so the new screens show up right away.
   const hadController = !!navigator.serviceWorker.controller;
   let reloaded = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded) { reloaded = true; location.reload(); } });
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded) { reloaded = true; try { sessionStorage.setItem('wt.updReload', '1'); } catch { /* ignore */ } location.reload(); } });
 }
 startup();
