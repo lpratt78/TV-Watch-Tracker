@@ -400,3 +400,7 @@ section[data-home-row] .section-h{margin-top:18px}
 .more-card .cover b{font:700 15px var(--display)}
 .more-card .cover span{font:700 26px var(--display)}
 .more-card{text-decoration:none}
+
+/* Watching card: Up next sized posters, running off the edge when there are more */
+.stack .spread{display:grid;grid-template-columns:repeat(calc(var(--n) - 1),minmax(0,128px)) 118px;gap:0}
+.stack .spread .cover{width:118px;flex:none;position:relative;box-shadow:2px 2px 8px rgba(0,0,0,.35)}

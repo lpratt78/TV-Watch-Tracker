@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.8.6';
+const APP_VERSION = '0.8.7';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -350,7 +350,7 @@ function renderHome() {
     const left = watching.reduce((n, it) => n + (showProgress(it)?.left || 0), 0);
     const mins = watching.reduce((n, it) => n + (showProgress(it)?.mins || 0), 0);
     body += `<button class="stack ${watchOpen ? 'open' : ''}" data-a="toggle-watching" aria-expanded="${watchOpen}" aria-label="Watching ${watching.length}. ${watchOpen ? 'Tap to close' : 'Tap to see each one'}">
-      <span class="spread">${watching.slice(0, 8).map((it) => cover(it, '', 'w154')).join('')}</span>
+      <span class="spread" style="--n:${Math.min(watching.length, 8)}">${watching.slice(0, 8).map((it, i) => cover(it, `z-index:${20 - i}`, 'w342')).join('')}</span>
       <span class="stack-foot"><b>Watching ${watching.length}</b>${left ? `<span>${left} episodes left${mins ? ` · ${fmtTime(mins)}` : ''}</span>` : ''}<span class="chev" aria-hidden="true">›</span></span></button>`;
     if (watchOpen) body += `<div class="stack-list">${watching.map((it) => `<a class="now" href="#/title/${it.type}/${it.id}">${cover(it)}<div class="meta">
       <span class="title">${esc(it.title)}</span><span class="author">${esc(typeTxt(it))}${runTag(it)}</span>
