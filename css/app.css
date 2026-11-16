@@ -376,3 +376,16 @@ section[data-home-row] .section-h{margin-top:18px}
 .pin-grid.all{gap:8px}
 .pin-grid.all button{font-size:13.5px;padding:5px 12px 5px 5px}
 .pin-grid.all button img{width:26px;height:26px}
+
+/* Discover: your services as cards */
+.svc-pick{display:flex;gap:8px;overflow-x:auto;padding:4px 2px 10px;margin:2px -2px 0;scrollbar-width:none}
+.svc-pick::-webkit-scrollbar{display:none}
+.svc-pick button{flex:0 0 auto;width:96px;display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 6px 8px;border:1px solid var(--line);background:var(--panel);border-radius:14px;color:var(--ink);font:600 11.5px var(--body);cursor:pointer}
+.svc-pick img,.svc-pick .all-ic{width:42px;height:42px;border-radius:11px;object-fit:cover}
+.svc-pick .all-ic{display:grid;place-items:center;background:var(--line);font:700 13px var(--display);color:var(--ink)}
+.svc-pick .n{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.svc-pick button[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 2px var(--accent);color:var(--accent)}
+/* Service page: explore rows */
+.svc-explore{margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
+.svc-explore h3{margin:0;font:700 18px var(--display)}
+.svc-explore>.author{margin:2px 0 6px}

@@ -224,3 +224,4 @@ export async function providerList() {
   return providerListCache;
 }
 export function clearProviderCache() { providerListCache = null; }
+export const cachedProviders = () => providerListCache || [];

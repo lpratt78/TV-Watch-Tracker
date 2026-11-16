@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.8.2';
+const APP_VERSION = '0.8.3';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -514,6 +514,14 @@ async function renderLibrary(r) {
     svcInfo = svc === NONE_SVC ? { name: 'No selected services' } : (mine.find((m) => m.key === svc) || whereServices()[svc] || null);
     if (!svcInfo) { location.hash = '#/services'; return {}; }
   }
+  // The service itself, to explore what else it has.
+  let svcRows = [];
+  if (svc && svc !== NONE_SVC) {
+    try {
+      const prov = (await T.providerList()).find((p) => T.serviceKey(p.name) === svc);
+      if (prov) svcRows = await serviceRows(prov, { fresh: true });
+    } catch { /* offline */ }
+  }
   const mineKeys = new Set(mine.map((m) => m.key));
   const inSvc = (i) => (svc === NONE_SVC ? !whereOf(i).some((k) => mineKeys.has(k)) : whereOf(i).includes(svc));
   // Genre filter: only offered once you've picked genres under Me.
@@ -563,14 +571,17 @@ async function renderLibrary(r) {
   } else {
     body += list.map(libRow).join('');
   }
-  return { top, body, after: () => { $('#lib-sort')?.addEventListener('change', (e) => { libState.sort = e.target.value; saveLib(); redraw(); }); $('#lib-genre')?.addEventListener('change', (e) => { libState.genre = e.target.value; saveLib(); redraw(); }); } };
+  if (svcRows.length) body += `<div class="svc-explore"><h3>More on ${esc(svcInfo.name)}</h3><p class="author">${libState.type === 'tv' ? 'Shows' : libState.type === 'movie' ? 'Movies' : 'Movies and shows'} you don't have yet.</p>${rowsHtml(svcRows, libState.type)}</div>`;
+  return { top, body, after: () => { if (svcRows.length) wireRows(svcRows, libState.type); $('#lib-sort')?.addEventListener('change', (e) => { libState.sort = e.target.value; saveLib(); redraw(); }); $('#lib-genre')?.addEventListener('change', (e) => { libState.genre = e.target.value; saveLib(); redraw(); }); } };
 }
 
 // ---------- Discover ----------
 let discType = 'all';
 let discQuery = '';
 let discGenre = '';
+let discSvc = 0;
 Object.assign(actions, {
+  'disc-svc': (el) => { discSvc = Number(el.dataset.v) || 0; redraw(); },
   'disc-type': (el) => { discType = el.dataset.v; redraw(); },
   'disc-genre': (el) => { discGenre = el.dataset.v; redraw(); },
   'refresh-discover': () => { T.clearMemo(); redraw(); },
@@ -609,41 +620,37 @@ async function renderDiscover() {
   if (discGenre && !genre) discGenre = '';
   const genreChips = chipGenres.length ? `<div class="chips genre-chips" role="group" aria-label="Genre"><button class="chip" data-a="disc-genre" data-v="" aria-pressed="${!discGenre}">All genres</button>${chipGenres.map((g) => `<button class="chip" data-a="disc-genre" data-v="${esc(g.name)}" aria-pressed="${discGenre === g.name}">${esc(g.name)}</button>`).join('')}</div>` : '';
 
-  // Every streaming service gets a row: yours first (picked under Me), then the rest.
-  let services = [];
-  try {
-    const mine = await T.selectedServices();
-    const ids = new Set(mine.map((p) => p.id));
-    const others = T.matchKnown(await T.providerList()).map((k) => k.provider).filter((p) => p && !ids.has(p.id));
-    services = [...mine, ...others];
-  } catch { /* offline with no saved list */ }
-  const rows = ['trending', 'popular-movie', 'popular-tv', 'upcoming-movie', 'onair-tv', 'new-tv', ...services.map((p) => `provider-${p.id}`)]
-    .map((key) => ({ key, ...rowSpec(key, services) }))
-    .filter((r) => !r.type || discType === 'all' || r.type === discType)
-    .map((r) => (genre && !r.provider ? { ...r, title: `${r.title} · ${genre.name}` } : r));
-  const qs = (r) => { const q = new URLSearchParams(); if (discType !== 'all' && !r.type) q.set('type', discType); if (genre) q.set('genre', genre.name); const x = q.toString(); return x ? `?${x}` : ''; };
+  // Your services as cards: tap one to explore just that service.
+  let mine = [];
+  try { mine = await T.selectedServices(); } catch { /* offline with no saved list */ }
+  const pick = mine.find((p) => p.id === discSvc) || null;
+  if (!pick) discSvc = 0;
+  const svcPick = mine.length ? `<div class="svc-pick" role="group" aria-label="Your services">
+    <button data-a="disc-svc" data-v="0" aria-pressed="${!pick}"><span class="all-ic">All</span><span class="n">All services</span></button>
+    ${mine.map((p) => `<button data-a="disc-svc" data-v="${p.id}" aria-pressed="${pick?.id === p.id}"><img src="${esc(T.img(p.logo, 'w92'))}" alt=""><span class="n">${esc(p.name)}</span></button>`).join('')}</div>` : '';
 
-  const rowsHtml = rows.map((r, i) => `<section data-row="${i}"><div class="section-h"><span>${r.logo ? `<img src="${esc(T.img(r.logo, 'w92'))}" alt="">` : ''}${esc(r.title)}</span><a href="#/browse/${r.key}${qs(r)}">See all ›</a></div>
-    <div class="shelf-scroll">${skeletonRow()}</div></section>`).join('');
-  const body = `${head}${genreChips}<div id="results"></div><div id="rows">${rowsHtml}</div>`;
+  let rows;
+  if (pick) {
+    rows = await serviceRows(pick, { genre });
+  } else {
+    // Every streaming service gets a row: yours first (picked under Me), then the rest.
+    let services = [...mine];
+    try {
+      const ids = new Set(mine.map((p) => p.id));
+      services.push(...T.matchKnown(await T.providerList()).map((k) => k.provider).filter((p) => p && !ids.has(p.id)));
+    } catch { /* offline */ }
+    rows = ['trending', 'popular-movie', 'popular-tv', 'upcoming-movie', 'onair-tv', 'new-tv', ...services.map((p) => `provider-${p.id}`)]
+      .map((key) => ({ key, ...rowSpec(key, services) }))
+      .filter((r) => !r.type || discType === 'all' || r.type === discType)
+      .map((r) => ({ ...r, genre, title: genre && !r.provider ? `${r.title} · ${genre.name}` : r.title }));
+  }
+  const body = `${head}${svcPick}${genreChips}<div id="results"></div><div id="rows">${rowsHtml(rows, discType)}</div>`;
 
   return {
     top, body,
     after: () => {
-      const io = new IntersectionObserver((ents) => {
-        for (const en of ents) {
-          if (!en.isIntersecting) continue;
-          io.unobserve(en.target);
-          const r = rows[Number(en.target.dataset.row)];
-          const sc = en.target.querySelector('.shelf-scroll');
-          loadRow(r.key, 1, discType, genre).then(({ items }) => {
-            const list = byType(items).slice(0, 20);
-            sc.innerHTML = list.length ? list.map(sugCard).join('') : `<p class="author">Nothing here${genre ? ` in ${esc(genre.name)}` : ''} right now.</p>`;
-            fillRunStatus(sc);
-          }).catch((e) => { sc.outerHTML = errorBox(e); });
-        }
-      }, { root: bodyEl, rootMargin: '500px 0px' });
-      $$('[data-row]').forEach((el) => io.observe(el));
+      wireRows(rows, discType);
+      if (pick) $('.svc-pick [aria-pressed="true"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
 
       const input = $('#q'); const out = $('#results'); const rowsEl = $('#rows');
       let seq = 0, timer;
@@ -689,9 +696,73 @@ function rowSpec(key, services = []) {
   }
   return null;
 }
+// A row of titles: { key, title, logo?, genre?, top? (well rated only), fresh? (not in your library) }.
+const TOP = { 'vote_average.gte': 7, 'vote_count.gte': 100 };
+function rowQs(r, type) {
+  const q = new URLSearchParams();
+  if (type !== 'all' && !r.type) q.set('type', type);
+  if (r.genre) q.set('genre', r.genre.name);
+  if (r.top) q.set('top', '1');
+  if (r.fresh) q.set('fresh', '1');
+  if (r.top || r.fresh || r.custom) q.set('t', r.title);
+  const x = q.toString(); return x ? `?${x}` : '';
+}
+function rowsHtml(rows, type) {
+  return rows.map((r, i) => `<section data-row="${i}"><div class="section-h"><span>${r.logo ? `<img src="${esc(T.img(r.logo, 'w92'))}" alt="">` : ''}${esc(r.title)}</span><a href="#/browse/${r.key}${rowQs(r, type)}">See all ›</a></div>
+    <div class="shelf-scroll">${skeletonRow()}</div></section>`).join('');
+}
+// Fill each row as it scrolls near the screen.
+function wireRows(rows, type) {
+  const io = new IntersectionObserver((ents) => {
+    for (const en of ents) {
+      if (!en.isIntersecting) continue;
+      io.unobserve(en.target);
+      const r = rows[Number(en.target.dataset.row)];
+      const sc = en.target.querySelector('.shelf-scroll');
+      loadRow(r.key, 1, type, r.genre, r.top ? TOP : {}).then(({ items }) => {
+        let list = items.filter((t) => type === 'all' || t.type === type);
+        if (r.fresh) list = notInLibrary(list);
+        list = list.slice(0, 20);
+        sc.innerHTML = list.length ? list.map(sugCard).join('') : `<p class="author">Nothing here${r.genre ? ` in ${esc(r.genre.name)}` : ''} right now.</p>`;
+        fillRunStatus(sc);
+      }).catch((e) => { sc.outerHTML = errorBox(e); });
+    }
+  }, { root: bodyEl, rootMargin: '500px 0px' });
+  $$('[data-row]').forEach((el) => io.observe(el));
+}
+// Several genres as one ("any of these").
+const comboGenre = (gs) => (gs.length === 1 ? gs[0] : { name: gs.map((g) => g.name).join(', '), movie: [...new Set(gs.flatMap((g) => g.movie))], tv: [...new Set(gs.flatMap((g) => g.tv))] });
+const genreFromQuery = (v) => { const gs = String(v || '').split(/,\s*/).map(genreByName).filter(Boolean); return gs.length ? comboGenre(gs) : null; };
+// The genres your library leans toward most.
+function libraryGenres(n = 3) {
+  const items = store.listItems();
+  return (genreCat?.list || []).map((g) => [g, items.filter((it) => inGenre(it, g)).length]).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]).slice(0, n).map(([g]) => g);
+}
+const DEFAULT_GENRES = ['Comedy', 'Drama', 'Action', 'Crime', 'Science Fiction', 'Documentary'];
+// Rows for exploring one streaming service: picks for you, popular, then a few genres.
+async function serviceRows(prov, { genre = null, fresh = false } = {}) {
+  const rows = await serviceRows0(prov, genre);
+  return fresh ? rows.map((r) => ({ ...r, fresh: true, custom: true })) : rows;
+}
+async function serviceRows0(prov, genre) {
+  try { await loadGenres(); } catch { /* offline */ }
+  const key = `provider-${prov.id}`, n = prov.name;
+  if (genre) return [
+    { key, title: `Popular ${genre.name} on ${n}`, genre, custom: true },
+    { key, title: `Top rated ${genre.name} on ${n}`, genre, top: true },
+  ];
+  const liked = myGenres().length ? myGenres() : libraryGenres(3);
+  const rows = [];
+  if (liked.length) rows.push({ key, title: `Top picks for you on ${n}`, genre: comboGenre(liked), top: true, fresh: true });
+  rows.push({ key, title: `Popular on ${n}`, custom: true });
+  const gs = myGenres().length ? myGenres() : DEFAULT_GENRES.map(genreByName).filter(Boolean);
+  for (const g of gs.slice(0, 6)) rows.push({ key, title: `${g.name} on ${n}`, genre: g, custom: true });
+  return rows;
+}
+
 // Load one page of a row, optionally in one genre. Returns { items, more }.
-async function loadRow(key, page = 1, type = 'all', genre = null) {
-  const spec = rowSpec(key);
+async function loadRow(key, page = 1, type = 'all', genre = null, filters = {}) {
+  const spec = rowSpec(key, T.cachedProviders());
   if (!spec) throw new Error('That list is not available.');
   const gIds = (t) => (genre ? (genre[t] || []).join('|') : '');
   if (key === 'for-you') { const r = await suggestions(page); return genre ? { ...r, items: r.items.filter((t) => inGenre(t, genre)) } : r; }
@@ -706,7 +777,7 @@ async function loadRow(key, page = 1, type = 'all', genre = null) {
     const region = store.getSettings().region;
     const types = (type === 'all' ? ['tv', 'movie'] : [type]).filter((t) => !genre || gIds(t));
     if (!types.length) return { items: [], more: false };
-    const res = await Promise.all(types.map((t) => T.tmdb(`/discover/${t}`, { with_watch_providers: spec.provider, watch_region: region, with_watch_monetization_types: 'flatrate|free|ads', sort_by: 'popularity.desc', with_genres: gIds(t), page })
+    const res = await Promise.all(types.map((t) => T.tmdb(`/discover/${t}`, { with_watch_providers: spec.provider, watch_region: region, with_watch_monetization_types: 'flatrate|free|ads', sort_by: 'popularity.desc', with_genres: gIds(t), ...filters, page })
       .then((d) => ({ t, d }))));
     const lists = res.map(({ t, d }) => (d.results || []).map((r) => T.norm(r, t)));
     const items = [];
@@ -741,15 +812,18 @@ async function renderBrowse(r) {
   let services = [];
   if (key.startsWith('provider-')) { try { services = await T.providerList(); } catch { /* ignore */ } }
   try { await loadGenres(); } catch { /* ignore */ }
-  const genre = genreByName(r.query.get('genre'));
+  const genre = genreFromQuery(r.query.get('genre'));
+  const top = r.query.get('top') ? TOP : {};
+  const fresh = !!r.query.get('fresh');
   const spec0 = rowSpec(key, services);
-  const spec = spec0 && genre ? { ...spec0, title: `${spec0.title} · ${genre.name}` } : spec0;
+  const custom = r.query.get('t');
+  const spec = spec0 && custom ? { ...spec0, title: custom } : spec0 && genre ? { ...spec0, title: `${spec0.title} · ${genre.name}` } : spec0;
   const type = spec?.type || r.query.get('type') || 'all';
-  const top = `<button class="icon-btn" data-a="back">‹ Back</button><h2>${esc(spec?.title || 'Browse')}</h2>`;
-  if (!spec) return { top, body: '<div class="empty-note">That list is not available.</div>' };
+  const head = `<button class="icon-btn" data-a="back">‹ Back</button><h2>${esc(spec?.title || 'Browse')}</h2>`;
+  if (!spec) return { top: head, body: '<div class="empty-note">That list is not available.</div>' };
   const body = `<div class="grid browse" id="browse"></div><div id="browse-more" class="loading">Loading…</div>`;
   return {
-    top, body,
+    top: head, body,
     after: () => {
       const grid = $('#browse'); const more = $('#browse-more');
       const shown = new Set();
@@ -758,11 +832,11 @@ async function renderBrowse(r) {
         if (busy || done) return;
         busy = true;
         try {
-          const { items, more: hasMore } = await loadRow(key, ++page, type, genre);
+          const { items, more: hasMore } = await loadRow(key, ++page, type, genre, top);
           if (!grid.isConnected) return;
-          const fresh = items.filter((t) => (type === 'all' || t.type === type) && !shown.has(`${t.type}:${t.id}`));
-          fresh.forEach((t) => shown.add(`${t.type}:${t.id}`));
-          grid.insertAdjacentHTML('beforeend', fresh.map(sugCard).join(''));
+          const newOnes = items.filter((t) => (type === 'all' || t.type === type) && !shown.has(`${t.type}:${t.id}`) && (!fresh || !store.getItem(t.type, t.id)));
+          newOnes.forEach((t) => shown.add(`${t.type}:${t.id}`));
+          grid.insertAdjacentHTML('beforeend', newOnes.map(sugCard).join(''));
           fillRunStatus(grid);
           done = !hasMore;
           more.textContent = done ? `${shown.size} titles` : 'Loading…';
