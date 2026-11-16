@@ -85,7 +85,8 @@ export const byProvider = (type, providerId) => {
 export const search = (query, page = 1) => tmdb('/search/multi', { query, page, include_adult: 'false' }).then(results());
 
 export const details = (type, id) => tmdb(`/${type}/${id}`, {
-  append_to_response: 'watch/providers,credits,external_ids',
+  append_to_response: 'watch/providers,credits,external_ids,videos',
+  include_video_language: `${(getSettings().language || 'en-US').slice(0, 2)},en,null`,
 });
 
 export const tvLite = (id, opts) => tmdb(`/tv/${id}`, {}, opts);

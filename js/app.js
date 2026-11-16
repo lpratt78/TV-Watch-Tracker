@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.8.0';
+const APP_VERSION = '0.8.1';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -805,6 +805,7 @@ async function renderTitle(r) {
   const releaseSoon = type === 'movie' && d.release_date && daysUntil(d.release_date) > 0;
   const base = { id, type, title: t.title, poster: t.poster, year: t.year };
   const it = store.getItem(type, id);
+  const trailer = pickTrailer(d.videos?.results);
 
   // Actions for this title page.
   Object.assign(actions, {
@@ -846,6 +847,7 @@ async function renderTitle(r) {
       ${type === 'tv' && d.status ? `<div class="series">${runTag({ type, id, runStatus: d.status }) || esc(d.status)}</div>` : ''}
       ${nextEp?.air_date ? `<span class="pill warn" style="margin-top:6px">S${nextEp.season_number} E${nextEp.episode_number} ${esc(inDays(nextEp.air_date))}</span>` : ''}
       ${releaseSoon ? `<span class="pill warn" style="margin-top:6px">Releases ${esc(inDays(d.release_date))}</span>` : ''}
+      ${trailer ? `<button class="trailer-btn" data-a="trailer" data-v="${esc(trailer.key)}" data-t="${esc(t.title)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>Trailer</button>` : ''}
     </div></div>
 
     <div class="label" style="margin-top:0">Status</div>
@@ -1188,6 +1190,33 @@ async function renderServices() {
     <div class="srcnote">Streaming info from <a href="https://www.justwatch.com" target="_blank" rel="noopener">JustWatch</a> via TMDB · ${esc(whereStore().region)}</div>`;
   return { top, body };
 }
+
+// ---------- Trailers (YouTube, from TMDB) ----------
+// Best pick: an official YouTube trailer in your language, then any trailer, then a teaser.
+function pickTrailer(videos = []) {
+  const yt = videos.filter((v) => v.site === 'YouTube' && v.key);
+  const lang = (store.getSettings().language || 'en-US').slice(0, 2);
+  const score = (v) => (v.type === 'Trailer' ? 4 : v.type === 'Teaser' ? 2 : 0) + (v.official ? 2 : 0) + (v.iso_639_1 === lang ? 1 : 0);
+  return yt.filter((v) => ['Trailer', 'Teaser'].includes(v.type)).sort((a, b) => score(b) - score(a) || String(b.published_at).localeCompare(String(a.published_at)))[0] || null;
+}
+function closeTrailer() { $id('trailer')?.remove(); document.removeEventListener('keydown', trailerKey); }
+const trailerKey = (e) => { if (e.key === 'Escape') closeTrailer(); };
+Object.assign(actions, {
+  trailer: (el) => {
+    closeTrailer();
+    const key = encodeURIComponent(el.dataset.v);
+    const wrap = document.createElement('div');
+    wrap.id = 'trailer'; wrap.className = 'trailer'; wrap.setAttribute('role', 'dialog'); wrap.setAttribute('aria-label', `Trailer: ${el.dataset.t}`);
+    wrap.innerHTML = `<div class="trailer-box"><div class="trailer-bar"><b>${esc(el.dataset.t)}</b><button class="icon-btn" data-a="trailer-close" aria-label="Close trailer">✕ Close</button></div>
+      <div class="trailer-frame"><iframe src="https://www.youtube-nocookie.com/embed/${key}?autoplay=1&playsinline=1&rel=0" title="Trailer" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div>
+      <a class="srcnote" href="https://www.youtube.com/watch?v=${key}" target="_blank" rel="noopener">Open in YouTube ↗</a></div>`;
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) closeTrailer(); });
+    document.body.appendChild(wrap);
+    document.addEventListener('keydown', trailerKey);
+  },
+  'trailer-close': () => closeTrailer(),
+});
+window.addEventListener('hashchange', closeTrailer);
 
 // ---------- Alerts ----------
 function renderAlerts() {
