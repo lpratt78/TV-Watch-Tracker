@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.6.5';
+const APP_VERSION = '0.7.0';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -183,19 +183,21 @@ const ICONS = {
   library: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="5.5" width="17" height="12" rx="2"/><path d="M8 20.5h8M10.5 9.5v5l4-2.5z"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>',
   lists: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M8 9h8M8 12.5h8M8 16h5"/></svg>',
+  services: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="2.5"/><path d="M8 3.5l4 2.5 4-2.5M10.5 10v4l3.5-2z"/></svg>',
   alerts: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 16V11a6 6 0 0112 0v5l1.5 2h-15zM10 20.5a2 2 0 004 0"/></svg>',
   more: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0114 0"/></svg>',
 };
 const TABS = [
   { id: 'home', label: 'Overview', icon: ICONS.home },
   { id: 'lists', label: 'Lists', icon: ICONS.lists },
+  { id: 'services', label: 'Services', icon: ICONS.services },
   { id: 'discover', label: 'Discover', icon: ICONS.search },
   { id: 'alerts', label: 'Alerts', icon: ICONS.alerts },
   { id: 'me', label: 'Me', icon: ICONS.more },
 ];
-const SCREENS = { home: renderHome, library: renderLibrary, discover: renderDiscover, alerts: renderAlerts, me: renderMe, about: renderAbout, title: renderTitle, season: renderSeason, browse: renderBrowse, mylists: renderMyLists, lists: renderLists, list: renderLibrary };
+const SCREENS = { home: renderHome, library: renderLibrary, discover: renderDiscover, alerts: renderAlerts, me: renderMe, about: renderAbout, title: renderTitle, season: renderSeason, browse: renderBrowse, mylists: renderMyLists, lists: renderLists, list: renderLibrary, services: renderServices, service: renderLibrary };
 const ALIASES = { updates: 'alerts', settings: 'me', search: 'discover', calendar: 'alerts' };
-const TAB_OF = { about: 'me', title: null, season: null, browse: 'discover', mylists: 'lists', list: 'lists', library: 'lists' };
+const TAB_OF = { about: 'me', title: null, season: null, browse: 'discover', mylists: 'lists', list: 'lists', library: 'lists', service: 'services' };
 let current = { name: 'home', args: [], query: new URLSearchParams() };
 let activeTab = 'home';
 
@@ -462,10 +464,15 @@ function libCell(it) {
 function renderLibrary(r) {
   const listName = r?.name === 'list' ? decodeURIComponent(r.args[0] || '') : '';
   if (listName && !store.listNames().includes(listName)) { location.hash = '#/lists'; return {}; }
-  const top = listName
+  const svc = r?.name === 'service' ? decodeURIComponent(r.args[0] || '') : '';
+  const svcInfo = svc ? whereServices()[svc] : null;
+  if (svc && !svcInfo) { location.hash = '#/services'; return {}; }
+  const top = svc
+    ? `<button class="icon-btn" data-a="back">‹ Services</button><h2>${svcInfo.logo ? `<img class="h-logo" src="${esc(T.img(svcInfo.logo, 'w92'))}" alt="">` : ''}${esc(svcInfo.name)}</h2>`
+    : listName
     ? `<button class="icon-btn" data-a="back">‹ Lists</button><h2>${esc(listName)}</h2>`
     : '<button class="icon-btn" data-a="back">‹ Lists</button><h2>Library</h2><a class="plus-btn" href="#/discover" aria-label="Add a movie or show">+</a>';
-  const all = store.listItems().filter((i) => (libState.type === 'all' || i.type === libState.type) && (!listName || (i.lists || []).includes(listName)));
+  const all = store.listItems().filter((i) => (libState.type === 'all' || i.type === libState.type) && (!listName || (i.lists || []).includes(listName)) && (!svc || whereOf(i).includes(svc)));
   const counts = { all: all.length };
   for (const k of Object.keys(STATUS)) counts[k] = all.filter((i) => i.status === k).length;
   const sorters = {
@@ -486,7 +493,9 @@ function renderLibrary(r) {
     </div>`;
 
   if (!list.length) {
-    body += listName
+    body += svc
+      ? `<div class="empty-state"><p>Nothing ${libState.shelf === 'all' ? '' : `on ${STATUS[libState.shelf].name} `}in your library streams on ${esc(svcInfo.name)} right now.</p></div>`
+      : listName
       ? `<div class="empty-state"><p>${libState.shelf === 'all' ? `Nothing on ${esc(listName)} yet.` : `Nothing on ${esc(listName)} is on ${STATUS[libState.shelf].name}.`} Open any show or movie and tap the list name to add it.</p></div>`
       : `<div class="empty-state"><p>${libState.shelf === 'all' ? 'Nothing here yet.' : `Nothing on ${STATUS[libState.shelf].name} yet.`}</p><a class="ghost-btn" href="#/discover">Find something to watch</a></div>`;
   } else if (libState.view === 'grid') {
@@ -698,6 +707,7 @@ async function renderTitle(r) {
   const genres = (d.genres || []).slice(0, 3).map((g) => g.name).join(', ');
   const region = store.getSettings().region;
   const wp = d['watch/providers']?.results?.[region];
+  saveWhere(type, id, wp);
   const groups = [['flatrate', 'Stream'], ['free', 'Free'], ['ads', 'Free with ads'], ['rent', 'Rent'], ['buy', 'Buy']]
     .filter(([k]) => wp?.[k]?.length)
     .map(([k, label]) => `<div class="pgroup"><small>${label}</small><div class="providers">${wp[k].map((p) => `<a href="${esc(watchUrl(p.provider_name, t.title, wp.link))}" target="_blank" rel="noopener" title="Open in ${esc(p.provider_name)}"><img src="${esc(T.img(p.logo_path, 'w92'))}" alt="${esc(p.provider_name)}"></a>`).join('')}</div></div>`).join('');
@@ -953,6 +963,85 @@ function watchUrl(provider, title, fallback) {
   return hit ? hit[1] + encodeURIComponent(title) : (fallback || `https://www.justwatch.com/us/search?q=${encodeURIComponent(title)}`);
 }
 
+// ---------- Streaming services: which titles in your library stream where ----------
+// Kept on this device: { region, items: { "tv:1": { t, s: [service key] } }, services: { key: { name, logo, priority } } }
+const WHERE_KEY = 'wt.where';
+const WHERE_DAYS = 7;
+let whereData = (() => { try { return JSON.parse(localStorage.getItem(WHERE_KEY) || 'null'); } catch { return null; } })();
+function whereStore() {
+  const region = store.getSettings().region;
+  if (!whereData || whereData.region !== region) whereData = { region, items: {}, services: {} };
+  return whereData;
+}
+const saveWhereStore = () => { try { localStorage.setItem(WHERE_KEY, JSON.stringify(whereData)); } catch { /* ignore */ } };
+// "Netflix Standard with Ads" and "Paramount+ Amazon Channel" count as Netflix and Paramount+.
+const serviceKey = (name) => String(name).replace(/\s+(standard|basic)?\s*with ads$/i, '').replace(/\s+(amazon|apple tv|roku premium)\s+channel$/i, '').replace(/\s+premium$/i, '').trim();
+function saveWhere(type, id, wp, { persist = true } = {}) {
+  const w = whereStore();
+  const names = new Map();
+  for (const k of ['flatrate', 'free', 'ads']) for (const p of wp?.[k] || []) {
+    const key = serviceKey(p.provider_name);
+    if (!names.has(key)) names.set(key, p);
+    const prev = w.services[key];
+    if (!prev || (p.display_priority ?? 999) < (prev.priority ?? 999)) w.services[key] = { name: key, logo: p.logo_path, priority: p.display_priority ?? 999 };
+  }
+  w.items[`${type}:${id}`] = { t: Date.now(), s: [...names.keys()] };
+  if (persist) saveWhereStore();
+}
+const whereOf = (it) => whereStore().items[`${it.type}:${it.id}`]?.s || [];
+const whereServices = () => whereStore().services;
+let whereBusy = null;
+// Look up where every library title streams (a few at a time), refreshing ones older than a week.
+function updateWhere() {
+  if (whereBusy || !store.getSettings().tmdbKey) return whereBusy;
+  const w = whereStore();
+  const todo = store.listItems().filter((it) => !w.items[it.key] || Date.now() - w.items[it.key].t > WHERE_DAYS * 864e5);
+  if (!todo.length) return null;
+  whereProgress = { done: 0, total: todo.length };
+  let i = 0;
+  whereBusy = Promise.all(Array.from({ length: 4 }, async () => {
+    while (i < todo.length) {
+      const it = todo[i++];
+      try { const d = await T.tmdb(`/${it.type}/${it.id}/watch/providers`); saveWhere(it.type, it.id, d.results?.[w.region], { persist: false }); } catch { /* try again next time */ }
+      whereProgress.done++;
+      const line = $id('where-line'); if (line) line.textContent = `Checking where your titles stream… ${whereProgress.done} of ${whereProgress.total}`;
+    }
+  })).then(() => { saveWhereStore(); whereBusy = null; whereProgress = null; if (['services', 'service'].includes(current.name)) redraw(); });
+  return whereBusy;
+}
+let whereProgress = null;
+Object.assign(actions, { 'where-refresh': () => { const w = whereStore(); for (const k of Object.keys(w.items)) w.items[k].t = 0; updateWhere(); redraw(); } });
+
+function renderServices() {
+  const top = '<h2>Services</h2><button class="icon-btn" data-a="where-refresh">↻ Refresh</button>';
+  if (!store.getSettings().tmdbKey) return { top, body: errorBox(new T.MissingKeyError()) };
+  updateWhere();
+  const items = store.listItems();
+  const by = new Map();
+  for (const it of items) for (const k of whereOf(it)) { if (!by.has(k)) by.set(k, []); by.get(k).push(it); }
+  const svcs = whereServices();
+  const cards = [...by.entries()].filter(([k]) => svcs[k]).sort((a, b) => b[1].length - a[1].length || (svcs[a[0]].priority - svcs[b[0]].priority));
+  const checking = whereProgress ? `<p class="muted-note" id="where-line">Checking where your titles stream… ${whereProgress.done} of ${whereProgress.total}</p>` : '';
+  if (!cards.length) return { top, body: checking || `<div class="empty-state"><p>None of the titles in your library are streaming in ${esc(whereStore().region)} right now, or they haven't been checked yet.</p></div>` };
+  const nowhere = items.filter((it) => whereStore().items[it.key] && !whereOf(it).length).length;
+  const body = `${checking}<p class="author" style="margin:0 0 10px">Where the titles in your library are streaming right now. Tap a service to see them.</p>
+    <div class="svc-cards">${cards.map(([k, list]) => {
+      const s = svcs[k];
+      const shows = list.filter((i) => i.type === 'tv').length;
+      const watching = list.filter((i) => i.status === 'watching').length;
+      const toWatch = list.filter((i) => i.status === 'watchlist').length;
+      const mins = list.reduce((n, it) => n + (showProgress(it)?.mins || 0), 0);
+      return `<a class="svc-card" href="#/service/${encodeURIComponent(k)}">
+        <span class="svc-head">${s.logo ? `<img src="${esc(T.img(s.logo, 'w92'))}" alt="">` : ''}<span class="meta"><span class="title">${esc(s.name)}</span>
+          <span class="author">${list.length} title${list.length === 1 ? '' : 's'} · ${shows} show${shows === 1 ? '' : 's'} · ${list.length - shows} movie${list.length - shows === 1 ? '' : 's'}</span></span><span class="chev" aria-hidden="true">›</span></span>
+        <span class="svc-strip">${list.slice(0, 6).map((it) => cover(it, '', 'w154')).join('')}</span>
+        <span class="svc-stats"><span><b>${watching}</b> watching</span><span><b>${toWatch}</b> to watch</span>${mins ? `<span><b>${fmtTime(mins)}</b> left</span>` : ''}</span></a>`;
+    }).join('')}</div>
+    ${nowhere ? `<p class="muted-note">${nowhere} title${nowhere === 1 ? ' isn’t' : 's aren’t'} streaming anywhere in ${esc(whereStore().region)} right now (rent or buy only).</p>` : ''}
+    <div class="srcnote">Streaming info from <a href="https://www.justwatch.com" target="_blank" rel="noopener">JustWatch</a> via TMDB · ${esc(whereStore().region)}</div>`;
+  return { top, body };
+}
+
 // ---------- Alerts ----------
 function renderAlerts() {
   const cache = store.getUpdatesCache();
@@ -1163,7 +1252,7 @@ function renderAbout() {
 }
 
 // ---------- startup ----------
-store.on('library', () => { sync.scheduleSync(); renderNav(); if (['library', 'home', 'lists', 'list'].includes(current.name)) redraw(); });
+store.on('library', () => { sync.scheduleSync(); renderNav(); if (['library', 'home', 'lists', 'list', 'services', 'service'].includes(current.name)) redraw(); });
 store.on('updates', () => { renderNav(); if (['home', 'alerts', 'library'].includes(current.name)) redraw(); });
 store.on('sync', (st) => { const line = $id('sync-line'); if (line) line.textContent = syncLine(st); });
 
