@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.5.0';
+const APP_VERSION = '0.5.1';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -125,7 +125,6 @@ const ICONS = {
 };
 const TABS = [
   { id: 'home', label: 'Overview', icon: ICONS.home },
-  { id: 'library', label: 'Library', icon: ICONS.library },
   { id: 'lists', label: 'Lists', icon: ICONS.lists },
   { id: 'discover', label: 'Discover', icon: ICONS.search },
   { id: 'alerts', label: 'Alerts', icon: ICONS.alerts },
@@ -133,7 +132,7 @@ const TABS = [
 ];
 const SCREENS = { home: renderHome, library: renderLibrary, discover: renderDiscover, alerts: renderAlerts, me: renderMe, about: renderAbout, title: renderTitle, season: renderSeason, browse: renderBrowse, mylists: renderMyLists, lists: renderLists, list: renderLibrary };
 const ALIASES = { updates: 'alerts', settings: 'me', search: 'discover', calendar: 'alerts' };
-const TAB_OF = { about: 'me', title: null, season: null, browse: 'discover', mylists: 'lists', list: 'lists' };
+const TAB_OF = { about: 'me', title: null, season: null, browse: 'discover', mylists: 'lists', list: 'lists', library: 'lists' };
 let current = { name: 'home', args: [], query: new URLSearchParams() };
 let activeTab = 'home';
 
@@ -373,7 +372,7 @@ function renderLibrary(r) {
   if (listName && !store.listNames().includes(listName)) { location.hash = '#/lists'; return {}; }
   const top = listName
     ? `<button class="icon-btn" data-a="back">‹ Lists</button><h2>${esc(listName)}</h2>`
-    : '<h2>Library</h2><a class="plus-btn" href="#/discover" aria-label="Add a movie or show">+</a>';
+    : '<button class="icon-btn" data-a="back">‹ Lists</button><h2>Library</h2><a class="plus-btn" href="#/discover" aria-label="Add a movie or show">+</a>';
   const all = store.listItems().filter((i) => (libState.type === 'all' || i.type === libState.type) && (!listName || (i.lists || []).includes(listName)));
   const counts = { all: all.length };
   for (const k of Object.keys(STATUS)) counts[k] = all.filter((i) => i.status === k).length;
@@ -791,7 +790,7 @@ function renderLists() {
   const items = store.listItems();
   const top = `<h2>Lists</h2>${names.length ? '<a class="icon-btn" href="#/mylists">Edit</a>' : ''}<a class="plus-btn" href="#/mylists" aria-label="New list">+</a>`;
   if (!names.length) {
-    return { top, body: `<div class="empty-state"><h3>No lists yet</h3><p>Make lists for anything you like, such as one for you, one for your wife, and one you watch together.</p><a class="primary" href="#/mylists">Make a list</a></div>` };
+    return { top, body: `${libraryCard(items)}<div class="empty-state"><h3>No lists yet</h3><p>Make lists for anything you like, such as one for you, one for your wife, and one you watch together.</p><a class="primary" href="#/mylists">Make a list</a></div>` };
   }
   const body = `<div class="list-cards">${names.map((n) => {
     const on = items.filter((i) => i.lists?.includes(n));
@@ -804,8 +803,20 @@ function renderLists() {
         <span class="author">${shows} show${shows === 1 ? '' : 's'} · ${on.length - shows} movie${on.length - shows === 1 ? '' : 's'}</span>
         ${on.length ? `<span class="series">${watching} watching · ${toWatch} to watch</span>` : '<span class="series">Empty</span>'}</span>
       <span class="chev" aria-hidden="true">›</span></a>`;
-  }).join('')}</div>`;
+  }).join('')}${libraryCard(items)}</div>`;
   return { top, body };
+}
+// The whole library, as the last card on the Lists screen.
+function libraryCard(items) {
+  const shows = items.filter((i) => i.type === 'tv').length;
+  const watching = items.filter((i) => i.status === 'watching').length;
+  const toWatch = items.filter((i) => i.status === 'watchlist').length;
+  return `<a class="list-card lib-card" href="#/library">
+    <span class="fan">${items.length ? items.slice(0, 4).map((it, i) => cover(it, `--i:${i}`, 'w154')).join('') : '<span class="cover empty-cover" style="--i:0"></span>'}</span>
+    <span class="meta"><span class="title">Library</span>
+      <span class="author">Everything you've added: ${shows} show${shows === 1 ? '' : 's'} · ${items.length - shows} movie${items.length - shows === 1 ? '' : 's'}</span>
+      <span class="series">${watching} watching · ${toWatch} to watch</span></span>
+    <span class="chev" aria-hidden="true">›</span></a>`;
 }
 
 // ---------- Alerts ----------
