@@ -92,6 +92,8 @@ button,input,select{font:inherit;color:inherit}
 .pill{display:inline-block;font:600 11px var(--body);padding:2px 8px;border-radius:999px}
 .pill.ok{background:var(--accent-soft);color:var(--accent)}
 .pill.warn{background:var(--amber-soft);color:var(--amber)}
+.pill.release{align-self:flex-start;white-space:normal;margin:2px 0}
+.season-head + .pill.release{margin:4px 0 0}
 .pill.blue{background:var(--blue-soft);color:var(--blue)}
 
 /* Countdown rows (Overview, Alerts) */

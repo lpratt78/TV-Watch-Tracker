@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.8.7';
+const APP_VERSION = '0.8.8';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -38,6 +38,14 @@ function inDays(d) {
   if (n > 1) return `in ${n} days`;
   if (n === -1) return 'yesterday';
   return `${-n} days ago`;
+}
+// "9 of 10 episodes out · next one Dec 3, in 15 days" for a season that is still airing.
+function releaseLine(out, total, next) {
+  if (!total || out >= total) return '';
+  const when = next?.air_date ? `${fmtDate(next.air_date)}, ${inDays(next.air_date)}` : 'date TBA';
+  if (!out) return `Premieres ${when}`;
+  const which = next?.episode_number && next.episode_number === total ? 'finale' : 'next one';
+  return `${out} of ${total} episodes out · ${which} ${when}`;
 }
 const localDay = (dt = new Date()) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
 
@@ -1009,9 +1017,11 @@ async function renderTitle(r) {
       <div class="seasons">${seasons.map((s) => {
         const aired = info?.seasons[s.season_number]?.aired ?? 0;
         const got = Math.min(seasonSeen(s.season_number), aired || Infinity);
+        const rel = aired ? releaseLine(aired, s.episode_count, nextEp?.season_number === s.season_number ? nextEp : null) : '';
         return `<a class="season-row" href="#/season/${id}/${s.season_number}">${cover({ title: s.name, poster: s.poster_path || t.poster, type: 'tv', year: s.air_date?.slice(0, 4) || '' }, '', 'w154')}
         <div class="meta"><span class="title">${esc(s.name)}</span>
           <span class="author">${s.episode_count || '?'} episodes${s.air_date ? ` · ${esc(daysUntil(s.air_date) > 0 ? `premieres ${fmtDate(s.air_date)}` : s.air_date.slice(0, 4))}` : ' · date TBA'}</span>
+          ${rel ? `<span class="pill warn release">${esc(rel)}</span>` : ''}
           ${aired ? `${bar(got, aired)}<span class="series">${got === aired ? '✓ Watched' : `${got} of ${aired} watched`}</span>` : ''}</div><span class="chev">›</span></a>`;
       }).join('')}</div>` : ''}
 
@@ -1045,6 +1055,8 @@ async function renderSeason(r) {
   const watched = (e) => allDone ? (e.air_date && e.air_date <= today) : !!it?.eps?.includes(`${n}x${e.episode_number}`);
   const airedCodes = episodes.filter((e) => e.air_date && e.air_date <= today).map((e) => `${n}x${e.episode_number}`);
   const seenHere = episodes.filter(watched).length;
+  const nextUp = episodes.find((e) => !(e.air_date && e.air_date <= today));
+  const rel = releaseLine(airedCodes.length, Math.max(episodes.length, info?.seasons[n]?.count || 0), nextUp);
   const minsLeft = episodes.filter((e) => e.air_date && e.air_date <= today && !watched(e)).reduce((m, e) => m + (e.runtime || info?.runtime || 0), 0);
   // If the show was marked Watched without episode detail, write the full list out before changing one.
   const expand = () => {
@@ -1070,6 +1082,7 @@ async function renderSeason(r) {
     <a class="season-head" href="#/title/tv/${id}">${cover(t, '', 'w154')}<div class="meta"><span class="title">${esc(t.title)}</span>
       <span class="author">${esc([season.name, season.air_date?.slice(0, 4), `${episodes.length} episodes`].filter(Boolean).join(' · '))}</span>
       ${airedCodes.length ? `${bar(seenHere, airedCodes.length)}<span class="series">${seenHere} of ${airedCodes.length} watched${minsLeft && seenHere < airedCodes.length ? ` · ${fmtTime(minsLeft)} left` : ''}</span>` : ''}</div></a>
+    ${rel ? `<span class="pill warn release">${esc(rel)}</span>` : ''}
     ${season.overview ? `<p class="author" style="margin:10px 0 0">${esc(season.overview)}</p>` : ''}
     ${airedCodes.length ? `<button class="ghost-btn" style="border-style:solid;margin:12px 0 4px" data-a="season-all" data-v="${seenHere >= airedCodes.length ? 'off' : 'on'}">${seenHere >= airedCodes.length ? 'Mark season unwatched' : 'Mark season watched'}</button>` : ''}
     <div class="eps">${episodes.map((e) => {
