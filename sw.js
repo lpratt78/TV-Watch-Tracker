@@ -1,5 +1,5 @@
 // Service worker: offline app shell, cached TMDB images, network-first TMDB API.
-const VERSION = 'wt-v0.8.7';
+const VERSION = 'wt-v0.8.8';
 const SHELL = `${VERSION}-shell`;
 const IMAGES = 'wt-images';
 const API = 'wt-api';
