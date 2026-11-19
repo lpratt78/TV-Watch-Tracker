@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.8.12';
+const APP_VERSION = '0.8.13';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -391,7 +391,7 @@ function renderHome() {
   };
 
   if (watchlist.length) {
-    body += '<div class="section-h">Up next <a href="#/library">Library ›</a></div>' + `<div class="shelf-scroll">${watchlist.map((it) => `<a class="sug" href="#/title/${it.type}/${it.id}">${cover(it, '', 'w342')}<span class="t">${esc(it.title)}</span><span class="why">${esc(typeTxt(it))}${runTag(it)}</span></a>`).join('')}</div>`;
+    body += '<div class="section-h">Up next <a href="#/library">Library ›</a></div>' + `<div class="shelf-scroll">${watchlist.map((it) => `<a class="sug" href="#/title/${it.type}/${it.id}">${cover(it, '', 'w342')}<span class="t">${esc(it.title)}</span><span class="why">${esc(typeTxt(it))}${runTag(it)}</span>${genreLine(it)}</a>`).join('')}</div>`;
   }
   body += rowsHtml;
   return { top, body, after: () => { autoScroll($('#coming')); fillNew(); loadRows(); if (tw.pending) fetchMovieInfo(); } };
@@ -424,7 +424,7 @@ async function newReleases() {
 // A poster card like the other rows, with how long ago it came out on the cover.
 function releaseCard(e) {
   return `<a class="sug rel" href="#/title/${e.type}/${e.id}">${cover(e)}<span class="ago">${esc(agoTxt(daysUntil(e.date)))}</span>
-    <span class="t">${esc(e.title)}</span><span class="why">${esc(e.what)} · ${esc(fmtDate(e.date))}</span></a>`;
+    <span class="t">${esc(e.title)}</span><span class="why">${esc(e.what)} · ${esc(fmtDate(e.date))}</span>${genreLine(e)}</a>`;
 }
 function agoTxt(d) {
   const n = -d;
@@ -491,6 +491,20 @@ const myGenres = () => (store.getSettings().genres || []).map(genreByName).filte
 const genreIdsOf = (t) => (t.genres?.length ? t.genres : t.type === 'tv' ? store.getShowInfo(t.id)?.genres : movieInfo()[t.id]?.g) || null;
 const inGenre = (t, g) => { const ids = genreIdsOf(t); return !!ids && ids.some((i) => (g[t.type] || []).includes(i)); };
 const inAnyGenre = (t, gs) => gs.some((g) => inGenre(t, g));
+// Up to two genre names for a card, in TMDB's order ("Drama · Comedy").
+function genreTxt(t) {
+  const ids = genreIdsOf(t);
+  if (!ids?.length || !genreCat?.list) return '';
+  const names = [];
+  for (const id of ids) {
+    const g = genreCat.list.find((x) => (x[t.type] || []).includes(id));
+    const n = g && ({ 'Science Fiction': 'Sci-Fi' }[g.name] || g.name);
+    if (n && !names.includes(n)) names.push(n);
+    if (names.length === 2) break;
+  }
+  return names.join(' · ');
+}
+const genreLine = (t) => { const g = genreTxt(t); return g ? `<span class="gen">${esc(g)}</span>` : ''; };
 
 // Slowly scroll a row sideways on its own, looping. Pauses while you touch it.
 function autoScroll(el) {
@@ -646,7 +660,7 @@ function sugCard(t) {
   const lib = store.getItem(t.type, t.id);
   const known = runOf(t);
   return `<div class="sug"${t.type === 'tv' ? ` data-tv="${t.id}"${known ? ` data-run="${known}"` : ''}` : ''}><a href="#/title/${t.type}/${t.id}" style="display:contents;color:inherit;text-decoration:none">${cover(t)}<span class="t">${esc(t.title)}</span></a>
-    <span class="why">${esc(typeTxt(t))}${t.vote ? ` · ★ ${t.vote.toFixed(1)}` : ''}${runTag(t)}</span>
+    <span class="why">${esc(typeTxt(t))}${t.vote ? ` · ★ ${t.vote.toFixed(1)}` : ''}${runTag(t)}</span>${genreLine(t)}
     <button class="add ${lib ? 'done' : ''}" data-a="quick-add" data-type="${t.type}" data-id="${t.id}">${lib ? `✓ ${STATUS[lib.status].name}` : '+ Watchlist'}</button></div>`;
 }
 function resultRow(t) {
