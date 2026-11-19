@@ -115,6 +115,7 @@ button,input,select{font:inherit;color:inherit}
 .sug .cover{width:100%;height:auto;aspect-ratio:2/3}
 .sug .t{font-size:12.5px;font-weight:600;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .sug .why{font-size:11px;color:var(--muted);line-height:1.35}
+.sug .gen{font-size:11px;font-weight:600;color:var(--accent);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .add{flex:none;align-self:flex-start;border:1px solid var(--accent);background:transparent;color:var(--accent);font:600 12px var(--body);border-radius:8px;padding:4px 9px;cursor:pointer}
 .add.done{background:var(--accent-soft);border-color:transparent}
 .sk .cover{background:var(--grey-soft);animation:pulse 1.2s ease-in-out infinite}
