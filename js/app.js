@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.8.11';
+const APP_VERSION = '0.8.12';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -380,13 +380,13 @@ function renderHome() {
     <div><b id="time-watched">${fmtTime(tw.mins) || '–'}</b><span>Total time watched${tw.pending ? ' (adding up…)' : ''}</span></div>
     <div class="wide"><b>${fmtTime(leftMins) || '–'}</b><span>Left to watch on the shows you're watching</span></div></div>`;
 
-  body += `<section id="new-rel"><div class="section-h"><span>Newly released</span><a href="#/browse/new-releases">See all ›</a></div><div class="auto-scroll"><div class="track">${skeletonRow()}</div></div></section>`;
+  body += `<section id="new-rel"><div class="section-h"><span>Newly released</span><a href="#/browse/new-releases">See all ›</a></div><div class="shelf-scroll">${skeletonRow()}</div></section>`;
   const fillNew = () => {
     const sec = $('#new-rel'); if (!sec) return;
     newReleases().then((list) => {
       if (!sec.isConnected) return;
       if (!list.length) { sec.remove(); return; }
-      sec.querySelector('.track').innerHTML = list.slice(0, 15).map(releaseCard).join('');
+      sec.querySelector('.shelf-scroll').innerHTML = list.slice(0, 15).map(releaseCard).join('') + (list.length > 15 ? '<a class="sug more-card" href="#/browse/new-releases"><span class="cover"><b>See all</b><span>›</span></span></a>' : '');
     }).catch(() => { sec.remove(); });
   };
 
@@ -421,15 +421,16 @@ async function newReleases() {
   newRelCache = { t: Date.now(), list };
   return notInLibrary(list);
 }
+// A poster card like the other rows, with how long ago it came out on the cover.
 function releaseCard(e) {
-  return `<a class="up-card" href="#/title/${e.type}/${e.id}">${cover(e, '', 'w154')}
-    <span class="meta"><span class="title">${esc(e.title)}</span><span class="author">${esc(e.what)}</span><span class="series">${esc(fmtDate(e.date))}</span></span>${agoBox(daysUntil(e.date))}</a>`;
+  return `<a class="sug rel" href="#/title/${e.type}/${e.id}">${cover(e)}<span class="ago">${esc(agoTxt(daysUntil(e.date)))}</span>
+    <span class="t">${esc(e.title)}</span><span class="why">${esc(e.what)} · ${esc(fmtDate(e.date))}</span></a>`;
 }
-function agoBox(d) {
+function agoTxt(d) {
   const n = -d;
-  if (n === 0) return '<div class="cd"><b>Today</b></div>';
-  const [v, u] = n < 60 ? [n, 'day'] : n < 730 ? [Math.round(n / 30.4), 'month'] : [Math.round(n / 365), 'year'];
-  return `<div class="cd"><b>${v}</b><span>${u}${v === 1 ? '' : 's'} ago</span></div>`;
+  if (n === 0) return 'Today';
+  if (n === 1) return 'Yesterday';
+  return `${n} days ago`;
 }
 
 // Run time and genres for movies in the library, kept on this device: { id: { r: minutes, g: [genre ids] } }.
@@ -931,7 +932,7 @@ async function renderBrowse(r) {
   if (key === 'new-releases') {
     const top = '<button class="icon-btn" data-a="back">‹ Back</button><h2>Newly released</h2>';
     const list = await newReleases();
-    return { top, body: list.length ? `<p class="author">Movies and shows out in the past month, newest first. Titles already in your library are under Coming up.</p><div class="release-list">${list.map(releaseCard).join('')}</div><p class="muted-note">${list.length} titles</p>` : '<div class="empty-note">Nothing new in the past month.</div>' };
+    return { top, body: list.length ? `<p class="author">Movies and shows out in the past month, newest first. Titles already in your library are under Coming up.</p><div class="grid browse">${list.map(releaseCard).join('')}</div><p class="muted-note">${list.length} titles</p>` : '<div class="empty-note">Nothing new in the past month.</div>' };
   }
   let services = [];
   if (key.startsWith('provider-')) { try { services = await T.providerList(); } catch { /* ignore */ } }
