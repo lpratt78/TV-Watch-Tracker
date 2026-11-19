@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.8.10';
+const APP_VERSION = '0.8.11';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -380,37 +380,50 @@ function renderHome() {
     <div><b id="time-watched">${fmtTime(tw.mins) || '–'}</b><span>Total time watched${tw.pending ? ' (adding up…)' : ''}</span></div>
     <div class="wide"><b>${fmtTime(leftMins) || '–'}</b><span>Left to watch on the shows you're watching</span></div></div>`;
 
-  const fresh = newlyReleased(all);
-  if (fresh.length) {
-    body += `<div class="section-h">Newly released</div><div class="auto-scroll"><div class="track">${fresh.map((e) => `<a class="up-card" href="#/title/${e.it.type}/${e.it.id}">${cover(e.it, '', 'w154')}
-      <span class="meta"><span class="title">${esc(e.it.title)}</span><span class="author">${esc(e.what)}</span><span class="series">${esc(fmtDate(e.date))}</span></span>${agoBox(daysUntil(e.date))}</a>`).join('')}</div></div>`;
-  }
+  body += `<section id="new-rel"><div class="section-h"><span>Newly released</span><a href="#/browse/new-releases">See all ›</a></div><div class="auto-scroll"><div class="track">${skeletonRow()}</div></div></section>`;
+  const fillNew = () => {
+    const sec = $('#new-rel'); if (!sec) return;
+    newReleases().then((list) => {
+      if (!sec.isConnected) return;
+      if (!list.length) { sec.remove(); return; }
+      sec.querySelector('.track').innerHTML = list.slice(0, 15).map(releaseCard).join('');
+    }).catch(() => { sec.remove(); });
+  };
 
   if (watchlist.length) {
     body += '<div class="section-h">Up next <a href="#/library">Library ›</a></div>' + `<div class="shelf-scroll">${watchlist.map((it) => `<a class="sug" href="#/title/${it.type}/${it.id}">${cover(it, '', 'w342')}<span class="t">${esc(it.title)}</span><span class="why">${esc(typeTxt(it))}${runTag(it)}</span></a>`).join('')}</div>`;
   }
   body += rowsHtml;
-  return { top, body, after: () => { autoScroll($('#coming')); loadRows(); if (tw.pending || movieDatesMissing(all)) fetchMovieInfo(); } };
+  return { top, body, after: () => { autoScroll($('#coming')); fillNew(); loadRows(); if (tw.pending) fetchMovieInfo(); } };
 }
 
-// Newest releases among your titles: the latest episode out for each show, and movies
-// (not yet watched) that are out. Newest first.
-function newlyReleased(all) {
-  const mi = movieInfo();
-  const out = [];
-  for (const it of all) {
-    if (it.type === 'tv') {
-      const l = store.getShowInfo(it.id)?.last;
-      if (!l?.date || daysUntil(l.date) > 0) continue;
-      const what = l.e === 1 ? `Season ${l.s} premiere` : `S${l.s} E${l.e}${l.name ? ` · ${l.name}` : ''}`;
-      out.push({ it, what, date: l.date });
-    } else if (it.status !== 'watched') {
-      const d = mi[it.id]?.d;
-      if (!d || daysUntil(d) > 0) continue;
-      out.push({ it, what: daysUntil(d) >= -30 ? 'New movie' : 'Movie', date: d });
-    }
-  }
-  return out.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 20);
+const NEW_DAYS = 30;
+const recent = (d) => { const n = daysUntil(d); return n !== null && n <= 0 && n >= -NEW_DAYS; };
+// Everything released in the past month: the most popular new movies and new shows on TMDB,
+// newest first. Titles already in your library are left out (Coming up covers those). Kept for 30 minutes.
+let newRelCache = null;
+async function newReleases() {
+  if (newRelCache && Date.now() - newRelCache.t < 30 * 60e3) return notInLibrary(newRelCache.list);
+  const region = store.getSettings().region;
+  const pages = [1, 2, 3];
+  const [movies, shows] = await Promise.all([
+    Promise.all(pages.map((page) => T.tmdb('/discover/movie', { 'primary_release_date.gte': isoDay(-NEW_DAYS), 'primary_release_date.lte': isoDay(), sort_by: 'popularity.desc', page }))),
+    Promise.all(pages.map((page) => T.tmdb('/discover/tv', { 'first_air_date.gte': isoDay(-NEW_DAYS), 'first_air_date.lte': isoDay(), sort_by: 'popularity.desc', watch_region: region, page }))),
+  ]);
+  const found = [
+    ...movies.flatMap((d) => (d.results || []).map((r) => ({ ...T.norm(r, 'movie'), what: 'New movie' }))),
+    ...shows.flatMap((d) => (d.results || []).map((r) => ({ ...T.norm(r, 'tv'), what: 'New show' }))),
+  ].filter((t) => t.poster && t.date && recent(t.date));
+  const byKey = new Map();
+  for (const t of found) { const k = `${t.type}:${t.id}`; if (!byKey.has(k)) byKey.set(k, t); }
+  const list = [...byKey.values()].sort((a, b) => b.date.localeCompare(a.date));
+  list.forEach(remember);
+  newRelCache = { t: Date.now(), list };
+  return notInLibrary(list);
+}
+function releaseCard(e) {
+  return `<a class="up-card" href="#/title/${e.type}/${e.id}">${cover(e, '', 'w154')}
+    <span class="meta"><span class="title">${esc(e.title)}</span><span class="author">${esc(e.what)}</span><span class="series">${esc(fmtDate(e.date))}</span></span>${agoBox(daysUntil(e.date))}</a>`;
 }
 function agoBox(d) {
   const n = -d;
@@ -418,7 +431,6 @@ function agoBox(d) {
   const [v, u] = n < 60 ? [n, 'day'] : n < 730 ? [Math.round(n / 30.4), 'month'] : [Math.round(n / 365), 'year'];
   return `<div class="cd"><b>${v}</b><span>${u}${v === 1 ? '' : 's'} ago</span></div>`;
 }
-const movieDatesMissing = (all) => { const mi = movieInfo(); return all.some((i) => i.type === 'movie' && i.status !== 'watched' && mi[i.id]?.d === undefined); };
 
 // Run time and genres for movies in the library, kept on this device: { id: { r: minutes, g: [genre ids] } }.
 const MOVIE_INFO_KEY = 'wt.movieInfo';
@@ -916,6 +928,11 @@ const notInLibrary = (items) => items.filter((t) => !store.getItem(t.type, t.id)
 // "See all" for one row: as many titles as TMDB has, loaded a page at a time as you scroll.
 async function renderBrowse(r) {
   const key = r.args[0] || '';
+  if (key === 'new-releases') {
+    const top = '<button class="icon-btn" data-a="back">‹ Back</button><h2>Newly released</h2>';
+    const list = await newReleases();
+    return { top, body: list.length ? `<p class="author">Movies and shows out in the past month, newest first. Titles already in your library are under Coming up.</p><div class="release-list">${list.map(releaseCard).join('')}</div><p class="muted-note">${list.length} titles</p>` : '<div class="empty-note">Nothing new in the past month.</div>' };
+  }
   let services = [];
   if (key.startsWith('provider-')) { try { services = await T.providerList(); } catch { /* ignore */ } }
   try { await loadGenres(); } catch { /* ignore */ }
