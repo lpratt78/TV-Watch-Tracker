@@ -272,6 +272,9 @@ section[data-row]:first-child .section-h{margin-top:10px}
 .up-card .meta{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
 .up-card .title,.up-card .author{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .up-card .cd{min-width:44px}
+.release-list{display:flex;flex-direction:column;gap:8px}
+.release-list .up-card{width:auto}
+.auto-scroll .track .sug.sk{width:248px}
 
 /* See all grid */
 .grid.browse .sug{width:auto}
