@@ -254,7 +254,9 @@ export function saveShowInfo(show) {
   const all = read(SHOWINFO_KEY, {});
   // Typical episode length in minutes, for "time left" estimates.
   const runtime = (show.episode_run_time || []).find(Boolean) || show.last_episode_to_air?.runtime || show.next_episode_to_air?.runtime || 0;
-  all[show.id] = { seasons, aired, total, runtime, status: show.status || '', genres: (show.genres || []).map((g) => g.id), t: Date.now() };
+  // The latest episode out, for the "Newly released" row on Overview.
+  const lastOut = last?.air_date ? { s: last.season_number, e: last.episode_number, name: last.name || '', date: last.air_date } : null;
+  all[show.id] = { seasons, aired, total, runtime, status: show.status || '', genres: (show.genres || []).map((g) => g.id), last: lastOut, t: Date.now() };
   write(SHOWINFO_KEY, all);
 }
 
