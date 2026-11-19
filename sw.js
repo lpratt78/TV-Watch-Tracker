@@ -1,5 +1,5 @@
 // Service worker: offline app shell, cached TMDB images, network-first TMDB API.
-const VERSION = 'wt-v0.8.9';
+const VERSION = 'wt-v0.8.10';
 const SHELL = `${VERSION}-shell`;
 const IMAGES = 'wt-images';
 const API = 'wt-api';
@@ -9,8 +9,10 @@ const SHELL_FILES = [
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
 
+// cache: 'reload' skips the browser's HTTP cache (GitHub Pages keeps files for 10 minutes),
+// so a new version never gets installed with the old files.
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(SHELL).then((c) => c.addAll(SHELL_FILES)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(SHELL).then((c) => c.addAll(SHELL_FILES.map((f) => new Request(f, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {

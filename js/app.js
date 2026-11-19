@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.8.9';
+const APP_VERSION = '0.8.10';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -1707,6 +1707,10 @@ document.addEventListener('visibilitychange', () => {
 });
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW failed', e)));
+  // Phones keep the app open in the background, so look for a new version each time it comes back.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') navigator.serviceWorker.getRegistration().then((r) => r?.update()).catch(() => {});
+  });
   // When a new version takes over, reload once so the new screens show up right away.
   const hadController = !!navigator.serviceWorker.controller;
   let reloaded = false;
