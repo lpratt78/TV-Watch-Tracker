@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.8.8';
+const APP_VERSION = '0.8.9';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -380,12 +380,45 @@ function renderHome() {
     <div><b id="time-watched">${fmtTime(tw.mins) || '–'}</b><span>Total time watched${tw.pending ? ' (adding up…)' : ''}</span></div>
     <div class="wide"><b>${fmtTime(leftMins) || '–'}</b><span>Left to watch on the shows you're watching</span></div></div>`;
 
+  const fresh = newlyReleased(all);
+  if (fresh.length) {
+    body += `<div class="section-h">Newly released</div><div class="auto-scroll"><div class="track">${fresh.map((e) => `<a class="up-card" href="#/title/${e.it.type}/${e.it.id}">${cover(e.it, '', 'w154')}
+      <span class="meta"><span class="title">${esc(e.it.title)}</span><span class="author">${esc(e.what)}</span><span class="series">${esc(fmtDate(e.date))}</span></span>${agoBox(daysUntil(e.date))}</a>`).join('')}</div></div>`;
+  }
+
   if (watchlist.length) {
     body += '<div class="section-h">Up next <a href="#/library">Library ›</a></div>' + `<div class="shelf-scroll">${watchlist.map((it) => `<a class="sug" href="#/title/${it.type}/${it.id}">${cover(it, '', 'w342')}<span class="t">${esc(it.title)}</span><span class="why">${esc(typeTxt(it))}${runTag(it)}</span></a>`).join('')}</div>`;
   }
   body += rowsHtml;
-  return { top, body, after: () => { autoScroll($('#coming')); loadRows(); if (tw.pending) fetchMovieInfo(); } };
+  return { top, body, after: () => { autoScroll($('#coming')); loadRows(); if (tw.pending || movieDatesMissing(all)) fetchMovieInfo(); } };
 }
+
+// Newest releases among your titles: the latest episode out for each show, and movies
+// (not yet watched) that are out. Newest first.
+function newlyReleased(all) {
+  const mi = movieInfo();
+  const out = [];
+  for (const it of all) {
+    if (it.type === 'tv') {
+      const l = store.getShowInfo(it.id)?.last;
+      if (!l?.date || daysUntil(l.date) > 0) continue;
+      const what = l.e === 1 ? `Season ${l.s} premiere` : `S${l.s} E${l.e}${l.name ? ` · ${l.name}` : ''}`;
+      out.push({ it, what, date: l.date });
+    } else if (it.status !== 'watched') {
+      const d = mi[it.id]?.d;
+      if (!d || daysUntil(d) > 0) continue;
+      out.push({ it, what: daysUntil(d) >= -30 ? 'New movie' : 'Movie', date: d });
+    }
+  }
+  return out.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 20);
+}
+function agoBox(d) {
+  const n = -d;
+  if (n === 0) return '<div class="cd"><b>Today</b></div>';
+  const [v, u] = n < 60 ? [n, 'day'] : n < 730 ? [Math.round(n / 30.4), 'month'] : [Math.round(n / 365), 'year'];
+  return `<div class="cd"><b>${v}</b><span>${u}${v === 1 ? '' : 's'} ago</span></div>`;
+}
+const movieDatesMissing = (all) => { const mi = movieInfo(); return all.some((i) => i.type === 'movie' && i.status !== 'watched' && mi[i.id]?.d === undefined); };
 
 // Run time and genres for movies in the library, kept on this device: { id: { r: minutes, g: [genre ids] } }.
 const MOVIE_INFO_KEY = 'wt.movieInfo';
@@ -405,10 +438,10 @@ async function fetchMovieInfo() {
   if (fetchingMovies) return; // once per app open, so being offline can't loop
   fetchingMovies = true;
   const mi = movieInfo();
-  const todo = store.listItems().filter((i) => i.type === 'movie' && !mi[i.id]);
+  const todo = store.listItems().filter((i) => i.type === 'movie' && (!mi[i.id] || (mi[i.id].d === undefined && i.status !== 'watched')));
   let i = 0;
   await Promise.all(Array.from({ length: 4 }, async () => {
-    while (i < todo.length) { const it = todo[i++]; try { const d = await T.movieLite(it.id); mi[it.id] = { r: d.runtime || 0, g: (d.genres || []).map((g) => g.id) }; } catch { /* try again next time */ } }
+    while (i < todo.length) { const it = todo[i++]; try { const d = await T.movieLite(it.id); mi[it.id] = { r: d.runtime || 0, g: (d.genres || []).map((g) => g.id), d: d.release_date || '' }; } catch { /* try again next time */ } }
   }));
   try { localStorage.setItem(MOVIE_INFO_KEY, JSON.stringify(mi)); } catch { /* ignore */ }
   if (todo.length && ['home', 'library', 'list', 'service'].includes(current.name)) redraw();
@@ -1659,7 +1692,7 @@ async function startup() {
     try { await sync.syncNow(); } catch (e) { console.warn('Sync failed', e); }
   } else if (sync.isSignedIn()) sync.preload();
   if (store.getSettings().tmdbKey) {
-    const needsInfo = store.listItems().some((i) => i.type === 'tv' && i.followed && store.getShowInfo(i.id)?.genres === undefined);
+    const needsInfo = store.listItems().some((i) => i.type === 'tv' && i.followed && store.getShowInfo(i.id)?.last === undefined);
     try { await checkUpdates({ force: needsInfo }); } catch (e) { console.warn('Update check failed', e); }
   }
 }
