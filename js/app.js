@@ -7,7 +7,7 @@ import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 import * as L from './livetv.js';
 
-const APP_VERSION = '0.9.3';
+const APP_VERSION = '0.9.4';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -383,13 +383,15 @@ function renderHome() {
     <div><b id="time-watched">${fmtTime(tw.mins) || '–'}</b><span>Total time watched${tw.pending ? ' (adding up…)' : ''}</span></div>
     <div class="wide"><b>${fmtTime(leftMins) || '–'}</b><span>Left to watch on the shows you're watching</span></div></div>`;
 
-  body += `<section id="new-rel"><div class="section-h"><span>Newly released</span><a href="#/browse/new-releases">See all ›</a></div><div class="shelf-scroll">${skeletonRow()}</div></section>`;
+  body += `<section id="new-rel"><div class="section-h"><span>Newly released</span><a href="#/browse/new-releases">See all ›</a></div><div class="auto-scroll" id="new-auto"><div class="track">${skeletonRow()}</div></div></section>`;
   const fillNew = () => {
     const sec = $('#new-rel'); if (!sec) return;
     newReleases().then((list) => {
       if (!sec.isConnected) return;
       if (!list.length) { sec.remove(); return; }
-      sec.querySelector('.shelf-scroll').innerHTML = list.slice(0, 15).map(releaseCard).join('') + (list.length > 15 ? '<a class="sug more-card" href="#/browse/new-releases"><span class="cover"><b>See all</b><span>›</span></span></a>' : '');
+      // The whole past month, newest first, slowly scrolling like Coming up.
+      sec.querySelector('.track').innerHTML = list.map(releaseCard).join('');
+      autoScroll($('#new-auto'));
     }).catch(() => { sec.remove(); });
   };
 
