@@ -7,7 +7,7 @@ import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 import * as L from './livetv.js';
 
-const APP_VERSION = '0.9.2';
+const APP_VERSION = '0.9.3';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -1727,7 +1727,7 @@ function renderAbout() {
 // What's on now and later on the channels of the live TV services you have.
 const myLive = () => (store.getSettings().liveServices || []).map(L.liveService).filter(Boolean);
 let liveChip = 'all';
-let liveView = 'now';
+let liveView = 'grid';
 const liveFeed = () => store.getSettings().liveFeed || L.defaultFeed();
 const clock = (t) => new Date(t).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 const epTxt = (a) => [a.se && a.no ? `S${a.se} E${a.no}` : '', a.ep].filter(Boolean).join(' · ');
@@ -1786,7 +1786,7 @@ async function renderLiveTV() {
   }
   const chips = `<div class="chips genre-chips live-chips" role="group" aria-label="Service">${[{ id: 'all', name: 'All' }, ...opts].map((o) => `<button class="chip" data-a="live-chip" data-v="${o.id}" aria-pressed="${liveChip === o.id}">${esc(o.name)}</button>`).join('')}</div>`;
   const feed = liveFeed();
-  const ctrls = `<div class="live-ctrls"><div class="seg" role="group" aria-label="When">${[['now', 'On now'], ['later', 'Later']].map(([k, l]) => `<button data-a="live-view" data-v="${k}" aria-pressed="${liveView === k}">${l}</button>`).join('')}</div>
+  const ctrls = `<div class="live-ctrls"><div class="seg" role="group" aria-label="When">${[['grid', 'Guide'], ['now', 'On now'], ['later', 'Later']].map(([k, l]) => `<button data-a="live-view" data-v="${k}" aria-pressed="${liveView === k}">${l}</button>`).join('')}</div>
     <div class="seg" role="group" aria-label="Feed">${[['east', 'East feed'], ['west', 'West feed']].map(([k, l]) => `<button data-a="live-feed" data-v="${k}" aria-pressed="${feed === k}">${l}</button>`).join('')}</div></div>`;
   const pick = mine.length ? '' : '<div class="empty-note">Showing local channels. Pick your live TV services under <a href="#/me">Me</a> to add their channels.</div>';
   const note = `<p class="muted-note live-note">Times are in your time zone. Network shows only: local news, syndicated shows, movies and many live games aren't listed, and lineups vary by area and plan. Tap a show to open it.</p>`;
@@ -1804,7 +1804,37 @@ async function renderLiveTV() {
   const now = Date.now();
   const tag = (c) => (liveChip === 'all' && opts.length > 1 ? `<span class="live-by">${c.by.map((v) => esc(v.short)).join(' · ')}</span>` : '');
   let list;
-  if (liveView === 'now') {
+  if (liveView === 'grid') {
+    // TV-style grid: half-hour times across the top, channels down the left, shows sized by length.
+    const PPM = 4; // pixels per minute: 120px per half hour
+    const from = Math.floor(now / 1800e3) * 1800e3;
+    const to = from + 6 * 3600e3;
+    const x = (t) => Math.round(((t - from) / 60e3) * PPM);
+    const width = x(to);
+    const slots = [];
+    for (let t = from; t < to; t += 1800e3) slots.push(`<div class="g-slot" style="left:${x(t)}px">${clock(t)}</div>`);
+    const rows = [];
+    let quiet = 0;
+    for (const [k, c] of chans) {
+      const air = (guide.get(k) || []).filter((a) => a.end > from && a.start < to);
+      if (!air.length) { quiet++; continue; }
+      const cells = air.map((a) => {
+        const l = x(Math.max(a.start, from));
+        const w = x(Math.min(a.end, to)) - l;
+        const on = a.start <= now && a.end > now;
+        const tip = `${a.n}${epTxt(a) ? ` · ${epTxt(a)}` : ''} · ${clock(a.start)} – ${clock(a.end)}`;
+        return `<button class="g-show${on ? ' on' : ''}" style="left:${l}px;width:${Math.max(w - 3, 8)}px" data-a="live-open" data-v="${esc(a.n)}" title="${esc(tip)}">
+          <b>${a.start < from ? '‹ ' : ''}${esc(a.n)}</b><span>${esc(epTxt(a) || `${clock(a.start)} – ${clock(a.end)}`)}</span></button>`;
+      }).join('');
+      rows.push(`<div class="g-row"><div class="g-ch"><b>${esc(c.name)}</b>${tag(c)}</div><div class="g-lane" style="width:${width}px">${cells}</div></div>`);
+    }
+    list = rows.length ? `<div class="g-wrap"><div class="g-grid" style="--w:${width}px">
+        <div class="g-row g-head"><div class="g-ch g-corner">${new Date(now).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</div><div class="g-lane" style="width:${width}px">${slots.join('')}</div></div>
+        ${rows.join('')}
+        <div class="g-now" style="left:calc(var(--chw) + ${x(now)}px)"></div></div></div>`
+      : '<div class="empty-note">Nothing listed on these channels in the next few hours.</div>';
+    if (quiet) list += `<p class="muted-note">${quiet} more channel${quiet === 1 ? '' : 's'} with nothing listed in the next 6 hours.</p>`;
+  } else if (liveView === 'now') {
     const rows = [];
     let quiet = 0;
     for (const [k, c] of chans) {
