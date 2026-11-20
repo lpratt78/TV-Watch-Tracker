@@ -7,7 +7,7 @@ import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 import * as L from './livetv.js';
 
-const APP_VERSION = '0.9.5';
+const APP_VERSION = '0.9.6';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -291,6 +291,11 @@ document.addEventListener('click', (e) => {
   try { actions[el.dataset.a](el, e); } catch (err) { console.error(err); toast('Something went wrong: ' + err.message); }
 });
 
+// Enter or Space on a card that acts as a button (the Watching card).
+document.addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('[role="button"][data-a]')) { e.preventDefault(); e.target.click(); }
+});
+
 function applyTheme(t) {
   const root = document.documentElement;
   if (t === 'light' || t === 'dark') { root.dataset.theme = t; try { localStorage.setItem('wt.theme', t); } catch { /* ignore */ } }
@@ -360,9 +365,10 @@ function renderHome() {
   else {
     const left = watching.reduce((n, it) => n + (showProgress(it)?.left || 0), 0);
     const mins = watching.reduce((n, it) => n + (showProgress(it)?.mins || 0), 0);
-    body += `<button class="stack ${watchOpen ? 'open' : ''}" data-a="toggle-watching" aria-expanded="${watchOpen}" aria-label="Watching ${watching.length}. ${watchOpen ? 'Tap to close' : 'Tap to see each one'}">
-      <span class="spread" style="--n:${Math.min(watching.length, 8)}">${watching.slice(0, 8).map((it, i) => cover(it, `z-index:${20 - i}`, 'w342')).join('')}</span>
-      <span class="stack-foot"><b>Watching ${watching.length}</b>${left ? `<span>${left} episodes left${mins ? ` · ${fmtTime(mins)}` : ''}</span>` : ''}<span class="chev" aria-hidden="true">›</span></span></button>`;
+    // The covers scroll slowly inside the card (like Coming up); a div so the strip can be swiped.
+    body += `<div class="stack ${watchOpen ? 'open' : ''}" role="button" tabindex="0" data-a="toggle-watching" aria-expanded="${watchOpen}" aria-label="Watching ${watching.length}. ${watchOpen ? 'Tap to close' : 'Tap to see each one'}">
+      <span class="spread auto-scroll" id="watch-auto"><span class="track">${watching.map((it) => cover(it, '', 'w342')).join('')}</span></span>
+      <span class="stack-foot"><b>Watching ${watching.length}</b>${left ? `<span>${left} episodes left${mins ? ` · ${fmtTime(mins)}` : ''}</span>` : ''}<span class="chev" aria-hidden="true">›</span></span></div>`;
     if (watchOpen) body += `<div class="stack-list">${watching.map((it) => `<a class="now" href="#/title/${it.type}/${it.id}">${cover(it)}<div class="meta">
       <span class="title">${esc(it.title)}</span><span class="author">${esc(typeTxt(it))}${runTag(it)}</span>
       ${nextUp(it) ? `<span class="series">${esc(nextUp(it))}</span>` : ''}${progressHtml(it)}
@@ -399,7 +405,7 @@ function renderHome() {
     body += '<div class="section-h">Up next <a href="#/library">Library ›</a></div>' + `<div class="shelf-scroll">${watchlist.map((it) => `<a class="sug" href="#/title/${it.type}/${it.id}">${cover(it, '', 'w342')}<span class="t">${esc(it.title)}</span><span class="why">${esc(typeTxt(it))}${runTag(it)}</span>${genreLine(it)}</a>`).join('')}</div>`;
   }
   body += rowsHtml;
-  return { top, body, after: () => { autoScroll($('#coming')); fillNew(); loadRows(); if (tw.pending) fetchMovieInfo(); } };
+  return { top, body, after: () => { autoScroll($('#coming')); autoScroll($('#watch-auto')); fillNew(); loadRows(); if (tw.pending) fetchMovieInfo(); } };
 }
 
 const NEW_DAYS = 30;
