@@ -32,7 +32,26 @@ export const LIVE_SERVICES = [
     channels: ['Hallmark Channel', 'Hallmark Mystery', 'A&E', 'History', 'Lifetime', 'Game Show Network', 'INSP', 'Great American Family', 'Weather Channel'] },
   { id: 'cable', name: 'Cable or satellite', short: 'Cable', plan: 'Typical expanded package',
     channels: [...LOCALS, 'ION', 'Telemundo', 'Univision', ...NEWS, ...SPORTS, ...WBD, ...NBCU, ...DISNEY, ...PARAMOUNT, ...AE, 'AMC', 'Cartoon Network', 'Hallmark Channel', 'Hallmark Mystery', 'BBC America', 'OWN', 'WE tv', 'Weather Channel', 'Game Show Network', 'Magnolia Network'] },
-].map((s) => ({ ...s, channels: [...new Set(s.channels)] }));
+  { id: 'spectrum', name: 'Spectrum TV Stream', short: 'Spectrum', plan: 'Streaming app',
+    channels: [...LOCALS, 'ION', 'Telemundo', 'Univision', ...NEWS, 'ESPN', 'ESPN2', 'FS1', 'Golf Channel', ...WBD, ...NBCU, ...DISNEY, ...PARAMOUNT, ...AE, 'AMC', 'Cartoon Network', 'Hallmark Channel', 'BBC America', 'OWN', 'WE tv', 'Weather Channel'] },
+  { id: 'xfinity', name: 'Xfinity Stream', short: 'Xfinity', plan: 'Streaming app',
+    channels: [...LOCALS, 'ION', 'Telemundo', 'Univision', ...NEWS, ...SPORTS, ...WBD, ...NBCU, ...DISNEY, ...PARAMOUNT, ...AE, 'AMC', 'Cartoon Network', 'Hallmark Channel', 'BBC America', 'OWN', 'WE tv', 'Weather Channel'] },
+  // Streaming services with a few live channels.
+  { id: 'paramountplus', name: 'Paramount+', short: 'P+', plan: 'With Showtime: live local CBS', channels: ['CBS'] },
+  { id: 'peacock', name: 'Peacock', short: 'Peacock', plan: 'Premium Plus: live local NBC', channels: ['NBC', 'Telemundo'] },
+  { id: 'foxone', name: 'Fox One', short: 'Fox One', plan: 'Streaming app', channels: ['FOX', 'Fox News', 'Fox Business', 'FS1'] },
+  { id: 'espn', name: 'ESPN app', short: 'ESPN', plan: 'Unlimited plan', channels: ['ESPN', 'ESPN2', 'ABC'] },
+  // Free live TV apps. Their channels are their own, so no public guide lists them.
+  { id: 'pluto', name: 'Pluto TV', short: 'Pluto', free: true, url: 'https://pluto.tv/live-tv' },
+  { id: 'roku', name: 'The Roku Channel', short: 'Roku', free: true, url: 'https://therokuchannel.roku.com/live-tv' },
+  { id: 'plex', name: 'Plex Live TV', short: 'Plex', free: true, url: 'https://watch.plex.tv/live-tv' },
+  { id: 'tubi', name: 'Tubi', short: 'Tubi', free: true, url: 'https://tubitv.com/live' },
+  { id: 'samsung', name: 'Samsung TV Plus', short: 'Samsung', free: true, url: 'https://www.samsungtvplus.com' },
+  { id: 'xumo', name: 'Xumo Play', short: 'Xumo', free: true, url: 'https://play.xumo.com/live-guide' },
+  { id: 'freestream', name: 'Sling Freestream', short: 'Freestream', free: true, url: 'https://www.sling.com/freestream' },
+  { id: 'primelive', name: 'Prime Video live TV', short: 'Prime', free: true, url: 'https://www.amazon.com/gp/video/livetv' },
+  { id: 'lg', name: 'LG Channels', short: 'LG', free: true, url: 'https://www.lg.com/us/lg-channels' },
+].map((s) => ({ ...s, channels: [...new Set(s.channels || [])] }));
 
 // Local channels: the broadcast stations in your area, free with an antenna and part of most
 // live TV services. Always offered on the guide.
