@@ -5,8 +5,9 @@ import * as T from './tmdb.js';
 import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
+import * as L from './livetv.js';
 
-const APP_VERSION = '0.8.14';
+const APP_VERSION = '0.9.0';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -203,9 +204,9 @@ const TABS = [
   { id: 'alerts', label: 'Alerts', icon: ICONS.alerts },
   { id: 'me', label: 'Me', icon: ICONS.more },
 ];
-const SCREENS = { home: renderHome, library: renderLibrary, discover: renderDiscover, alerts: renderAlerts, me: renderMe, about: renderAbout, title: renderTitle, season: renderSeason, browse: renderBrowse, mylists: renderMyLists, lists: renderLists, list: renderLibrary, services: renderServices, service: renderLibrary, pickservices: renderPickServices, top: renderTop };
+const SCREENS = { home: renderHome, library: renderLibrary, discover: renderDiscover, alerts: renderAlerts, me: renderMe, about: renderAbout, title: renderTitle, season: renderSeason, browse: renderBrowse, mylists: renderMyLists, lists: renderLists, list: renderLibrary, services: renderServices, service: renderLibrary, pickservices: renderPickServices, top: renderTop, livetv: renderLiveTV };
 const ALIASES = { updates: 'alerts', settings: 'me', search: 'discover', calendar: 'alerts' };
-const TAB_OF = { about: 'me', title: null, season: null, browse: 'discover', mylists: 'lists', list: 'lists', library: 'lists', service: 'services', pickservices: 'me', top: 'discover' };
+const TAB_OF = { about: 'me', title: null, season: null, browse: 'discover', mylists: 'lists', list: 'lists', library: 'lists', service: 'services', pickservices: 'me', top: 'discover', livetv: null };
 let current = { name: 'home', args: [], query: new URLSearchParams() };
 let activeTab = 'home';
 
@@ -1429,6 +1430,7 @@ async function renderServices() {
   };
   const body = `${checking}<p class="author" style="margin:0 0 10px">The titles in your library on each service you have. Pick your services under <a href="#/me">Me</a>.</p>
     ${mine.length ? '' : '<div class="empty-note">You haven\'t picked any services yet. Go to <a href="#/me">Me</a> and tap the ones you have.</div>'}
+    <a class="link-row live-link" href="#/livetv">Live TV guide <span class="author" style="font-weight:500">${(store.getSettings().liveServices || []).length ? 'What\'s on now' : 'Local channels'} ›</span></a>
     <div class="svc-cards">${cards.map(([k, list, s]) => card(k, list, s, `#/service/${encodeURIComponent(k)}`)).join('')}
     ${none.length ? card(NONE_SVC, none, { name: 'No selected services' }, `#/service/${NONE_SVC}`) : ''}</div>
     <div class="srcnote">Streaming info from <a href="https://www.justwatch.com" target="_blank" rel="noopener">JustWatch</a> via TMDB · ${esc(whereStore().region)}</div>`;
@@ -1658,6 +1660,8 @@ async function renderMe() {
       <p class="author" style="margin:0 0 4px">Tap the services you have. Each gets a card on the Services tab and shows first on Discover.</p>${await servicesHtml(s)}
       <div class="gfield" style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px"><span>Region for streaming info<br><small class="author">Two-letter country code</small></span><input id="region" value="${esc(s.region)}" maxlength="2" aria-label="Region"></div></div>
 
+    ${liveServicesCard(s)}
+
     ${store.builtIn.tmdb ? '' : `<div class="card"><h3>TMDB key</h3><p class="author">Get one free at <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">themoviedb.org</a>. Saved only on this device.</p>
       <div class="name-edit"><input id="tmdbKey" type="password" value="${esc(s.tmdbKey)}" style="width:100%"><button class="text-btn" id="save-tmdb">Save</button></div></div>`}
 
@@ -1711,9 +1715,119 @@ function renderAbout() {
     <div class="card"><h3>Streaming info from JustWatch</h3>
       <p>Where-to-watch information is provided by <a href="https://www.justwatch.com" target="_blank" rel="noopener">JustWatch</a>, delivered through TMDB's watch provider data.</p>
       <p class="author" style="margin:0">Availability changes often and can differ by region.</p></div>
+    <div class="card"><h3>TV schedule from TVmaze</h3>
+      <p class="author" style="margin:0">The Live TV guide uses the free schedule from <a href="https://www.tvmaze.com" target="_blank" rel="noopener">TVmaze</a> (CC BY-SA). Channel lineups for each service are approximate.</p></div>
     <div class="card"><h3>Your data</h3><p class="author" style="margin:0">Your lists live on this device. If you sign in with Google, a copy is kept in a hidden app folder in your own Google Drive that only this app can see. Nothing is sent anywhere else.</p></div>`,
   };
 }
+
+// ---------- Live TV guide ----------
+// What's on now and later on the channels of the live TV services you have.
+const myLive = () => (store.getSettings().liveServices || []).map(L.liveService).filter(Boolean);
+let liveChip = 'all';
+let liveView = 'now';
+const liveFeed = () => store.getSettings().liveFeed || L.defaultFeed();
+const clock = (t) => new Date(t).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+const epTxt = (a) => [a.se && a.no ? `S${a.se} E${a.no}` : '', a.ep].filter(Boolean).join(' · ');
+const liveTitle = (a) => `<button class="live-show" data-a="live-open" data-v="${esc(a.n)}">${esc(a.n)}</button>`;
+
+Object.assign(actions, {
+  'live-svc': (el) => {
+    const cur = new Set(store.getSettings().liveServices || []);
+    const id = el.dataset.v;
+    cur.has(id) ? cur.delete(id) : cur.add(id);
+    store.saveSettings({ liveServices: L.LIVE_SERVICES.map((s) => s.id).filter((x) => cur.has(x)) });
+    el.setAttribute('aria-pressed', String(cur.has(id)));
+    const n = $('.live-count'); if (n) n.textContent = svcCount(cur.size);
+  },
+  'live-chip': (el) => { liveChip = el.dataset.v; redraw(); },
+  'live-view': (el) => { liveView = el.dataset.v; redraw(); },
+  'live-feed': (el) => { store.saveSettings({ liveFeed: el.dataset.v }); redraw(); },
+  'live-refresh': async (el) => {
+    el.disabled = true; el.textContent = 'Loading…';
+    try { await L.loadSchedule({ fresh: true }); } catch (e) { toast(e.message, 4000); }
+    redraw();
+  },
+  // Open the show in the app: find it on TMDB by name.
+  'live-open': async (el) => {
+    const name = el.dataset.v;
+    try {
+      const hit = (await T.search(name)).find((t) => t.type === 'tv') || null;
+      if (hit) { remember(hit); location.hash = `#/title/tv/${hit.id}`; } else toast(`Couldn't find ${name}.`);
+    } catch (e) { toast(e.message, 4000); }
+  },
+});
+
+// Me card: tap the live TV services you have.
+function liveServicesCard(s) {
+  const sel = new Set(s.liveServices || []);
+  return `<div class="card"><h3>Live TV services</h3>
+    <p class="author" style="margin:0 0 4px">Tap the live TV services you have. The Live TV guide shows what's on their channels, plus your local channels.</p>
+    <span class="author live-count">${svcCount(sel.size)}</span>
+    <div class="chips" style="margin-top:8px">${L.LIVE_SERVICES.map((v) => `<button class="chip" data-a="live-svc" data-v="${v.id}" aria-pressed="${sel.has(v.id)}">${esc(v.name)}</button>`).join('')}</div>
+    <a class="link-row" href="#/livetv" style="padding-bottom:0">Open Live TV guide <span>›</span></a></div>`;
+}
+
+async function renderLiveTV() {
+  const top = '<button class="icon-btn" data-a="back">‹ Back</button><h2>Live TV guide</h2><button class="icon-btn" data-a="live-refresh">↻</button>';
+  const mine = myLive();
+  const opts = [...mine, L.LOCAL];
+  if (liveChip !== 'all' && !opts.some((o) => o.id === liveChip)) liveChip = 'all';
+  const picked = liveChip === 'all' ? opts : opts.filter((o) => o.id === liveChip);
+  // Channels to show, in lineup order, with which of your services carry each one.
+  const chans = new Map();
+  for (const svc of picked) for (const c of svc.channels) {
+    const k = L.netKey(c);
+    if (!chans.has(k)) chans.set(k, { name: c, by: [] });
+    chans.get(k).by.push(svc);
+  }
+  const chips = `<div class="chips genre-chips live-chips" role="group" aria-label="Service">${[{ id: 'all', name: 'All' }, ...opts].map((o) => `<button class="chip" data-a="live-chip" data-v="${o.id}" aria-pressed="${liveChip === o.id}">${esc(o.name)}</button>`).join('')}</div>`;
+  const feed = liveFeed();
+  const ctrls = `<div class="live-ctrls"><div class="seg" role="group" aria-label="When">${[['now', 'On now'], ['later', 'Later']].map(([k, l]) => `<button data-a="live-view" data-v="${k}" aria-pressed="${liveView === k}">${l}</button>`).join('')}</div>
+    <div class="seg" role="group" aria-label="Feed">${[['east', 'East feed'], ['west', 'West feed']].map(([k, l]) => `<button data-a="live-feed" data-v="${k}" aria-pressed="${feed === k}">${l}</button>`).join('')}</div></div>`;
+  const pick = mine.length ? '' : '<div class="empty-note">Showing local channels. Pick your live TV services under <a href="#/me">Me</a> to add their channels.</div>';
+  const note = `<p class="muted-note live-note">Times are in your time zone. Network shows only: local news, syndicated shows, movies and many live games aren't listed, and lineups vary by area and plan. Tap a show to open it.</p>`;
+  const src = `<div class="srcnote">Schedule from <a href="https://www.tvmaze.com" target="_blank" rel="noopener">TVmaze</a> · channel lineups are approximate</div>`;
+
+  let entries;
+  try { entries = await L.loadSchedule(); } catch (e) { return { top, body: chips + pick + errorBox(e) }; }
+  const guide = L.buildGuide(entries, feed);
+  const now = Date.now();
+  const tag = (c) => (liveChip === 'all' && opts.length > 1 ? `<span class="live-by">${c.by.map((v) => esc(v.short)).join(' · ')}</span>` : '');
+  let list;
+  if (liveView === 'now') {
+    const rows = [];
+    let quiet = 0;
+    for (const [k, c] of chans) {
+      const air = guide.get(k) || [];
+      const cur = air.find((a) => a.start <= now && a.end > now);
+      const next = air.filter((a) => a.start > now).slice(0, 2);
+      if (!cur && !next.length) { quiet++; continue; }
+      const pct = cur ? Math.round(((now - cur.start) / (cur.end - cur.start)) * 100) : 0;
+      rows.push(`<div class="live-row"><div class="live-ch"><b>${esc(c.name)}</b>${tag(c)}</div>
+        ${cur ? `<div class="live-now">${cur.img ? `<img src="${esc(cur.img)}" alt="" loading="lazy">` : ''}<div class="live-info"><div>${liveTitle(cur)}</div>${epTxt(cur) ? `<div class="author">${esc(epTxt(cur))}</div>` : ''}
+          <div class="prog-sub">${clock(cur.start)} – ${clock(cur.end)} · ${Math.max(1, Math.round((cur.end - now) / 60e3))} min left</div><span class="prog"><span style="width:${pct}%"></span></span></div></div>`
+          : '<div class="author live-off">Nothing listed right now</div>'}
+        ${next.map((a) => `<div class="live-next"><span class="live-t">${clock(a.start)}</span>${liveTitle(a)}${epTxt(a) ? ` <span class="author">${esc(epTxt(a))}</span>` : ''}</div>`).join('')}</div>`);
+    }
+    list = rows.length ? rows.join('') : '<div class="empty-note">Nothing listed on these channels right now.</div>';
+    if (quiet) list += `<p class="muted-note">${quiet} more channel${quiet === 1 ? '' : 's'} with nothing listed for the next few hours.</p>`;
+  } else {
+    const until = now + 12 * 3600e3;
+    const ups = [];
+    for (const [k, c] of chans) for (const a of guide.get(k) || []) if (a.start > now && a.start < until) ups.push({ a, c });
+    ups.sort((x, y) => x.a.start - y.a.start || x.c.name.localeCompare(y.c.name));
+    let hour = '';
+    list = ups.length ? ups.slice(0, 250).map(({ a, c }) => {
+      const h = clock(a.start);
+      const head = h !== hour ? `<div class="section-h">${(hour = h)}</div>` : '';
+      return `${head}<div class="live-later"><span class="live-chn">${esc(c.name)}</span><span class="live-info">${liveTitle(a)}${epTxt(a) ? `<span class="author">${esc(epTxt(a))}</span>` : ''}</span></div>`;
+    }).join('') : '<div class="empty-note">Nothing else listed on these channels in the next 12 hours.</div>';
+  }
+  return { top, body: chips + ctrls + pick + list + note + src };
+}
+// Keep "On now" current while the guide is open.
+setInterval(() => { if (current.name === 'livetv' && document.visibilityState === 'visible') redraw(); }, 60e3);
 
 // ---------- startup ----------
 store.on('library', () => { sync.scheduleSync(); renderNav(); if (['library', 'home', 'lists', 'list', 'services', 'service'].includes(current.name)) redraw(); });

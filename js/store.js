@@ -15,6 +15,8 @@ const DEFAULT_SETTINGS = {
   autoSync: false,      // Set true once the user signs in with Google.
   name: '',             // Shown on the Me screen.
   genres: [],           // Genre names you like, used to filter Discover, Overview and the Library.
+  liveServices: [],     // Live TV services you have (ids from LIVE_SERVICES in livetv.js), for the Live TV guide.
+  liveFeed: null,       // 'east' or 'west' channel feed for the guide; null = from your time zone.
 };
 
 function read(key, fallback) {
