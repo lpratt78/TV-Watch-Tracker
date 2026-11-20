@@ -409,3 +409,25 @@ section[data-home-row] .section-h{margin-top:18px}
 /* Watching card: Up next sized posters, running off the edge when there are more */
 .stack .spread{display:grid;grid-template-columns:repeat(calc(var(--n) - 1),minmax(0,128px)) 118px;gap:0}
 .stack .spread .cover{width:118px;flex:none;position:relative;box-shadow:2px 2px 8px rgba(0,0,0,.35)}
+
+/* Live TV guide */
+.live-chips{flex-wrap:nowrap;overflow-x:auto;margin:0 -2px 10px;padding:0 2px 2px;scrollbar-width:none}
+.live-chips::-webkit-scrollbar{display:none}
+.live-chips .chip{flex:none}
+.live-ctrls{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;margin-bottom:10px}
+.live-row{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px}
+.live-ch{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:13px;margin-bottom:6px}
+.live-by{font:500 10.5px var(--mono);color:var(--muted);text-align:right}
+.live-now{display:flex;gap:10px;align-items:flex-start}
+.live-now img{width:40px;height:56px;object-fit:cover;border-radius:5px;flex:none;background:var(--line)}
+.live-info{min-width:0;flex:1;display:flex;flex-direction:column;gap:1px}
+.live-show{border:0;background:none;padding:0;font:600 14px var(--body);color:var(--ink);cursor:pointer;text-align:left}
+.live-show:hover{color:var(--accent)}
+.live-next{font-size:12.5px;margin-top:6px;padding-top:6px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
+.live-next .live-show{font-size:13px;font-weight:500}
+.live-t{font:600 11.5px var(--mono);color:var(--muted);min-width:62px}
+.live-off{font-size:12.5px}
+.live-later{display:flex;gap:10px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--line)}
+.live-chn{font:600 11.5px var(--body);color:var(--muted);width:92px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.live-later .live-show{font-size:13.5px}
+.live-note{margin-top:12px}
