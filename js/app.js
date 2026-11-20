@@ -7,7 +7,7 @@ import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 import * as L from './livetv.js';
 
-const APP_VERSION = '0.9.4';
+const APP_VERSION = '0.9.5';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -370,8 +370,8 @@ function renderHome() {
   }
 
   body += '<div class="section-h">Coming up <a href="#/alerts">Alerts ›</a></div>';
-  body += upcoming.length ? `<div class="auto-scroll" id="coming"><div class="track">${upcoming.map((e) => `<a class="up-card" href="#/title/${e.itemType}/${e.id}">${cover({ title: e.title, poster: e.poster, type: e.itemType, id: e.id }, '', 'w154')}
-      <span class="meta"><span class="title">${esc(e.title)}</span><span class="author">${esc(e.what)}</span><span class="series">${esc(fmtDate(e.date))}</span></span>${countdown(daysUntil(e.date))}</a>`).join('')}</div></div>`
+  body += upcoming.length ? `<div class="auto-scroll" id="coming"><div class="track">${upcoming.map((e) => `<a class="sug rel" href="#/title/${e.itemType}/${e.id}">${cover({ title: e.title, poster: e.poster, type: e.itemType, id: e.id })}<span class="ago">${esc(untilTxt(daysUntil(e.date)))}</span>
+      <span class="t">${esc(e.title)}</span><span class="why">${esc(e.what)}</span><span class="why">${esc(fmtDate(e.date))}</span></a>`).join('')}</div></div>`
     : '<p class="author">No premieres or release dates coming up for your titles yet. The app checks every time it opens.</p>';
 
   const tw = timeWatched(all);
@@ -430,6 +430,13 @@ async function newReleases() {
 function releaseCard(e) {
   return `<a class="sug rel" href="#/title/${e.type}/${e.id}">${cover(e)}<span class="ago">${esc(agoTxt(daysUntil(e.date)))}</span>
     <span class="t">${esc(e.title)}</span><span class="why">${esc(e.what)} · ${esc(fmtDate(e.date))}</span>${genreLine(e)}</a>`;
+}
+// "In 5 days" badge for the Coming up cards.
+function untilTxt(d) {
+  if (d === null) return 'Date TBA';
+  if (d <= 0) return 'Today';
+  if (d === 1) return 'Tomorrow';
+  return `In ${d} days`;
 }
 function agoTxt(d) {
   const n = -d;
