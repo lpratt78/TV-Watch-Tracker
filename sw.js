@@ -1,11 +1,11 @@
 // Service worker: offline app shell, cached TMDB images, network-first TMDB API.
-const VERSION = 'wt-v0.9.6';
+const VERSION = 'wt-v0.9.7';
 const SHELL = `${VERSION}-shell`;
 const IMAGES = 'wt-images';
 const API = 'wt-api';
 const SHELL_FILES = [
   './', 'index.html', 'css/app.css', 'manifest.webmanifest',
-  'js/app.js', 'js/store.js', 'js/tmdb.js', 'js/updates.js', 'js/sync.js', 'js/trakt.js', 'js/livetv.js',
+  'js/app.js', 'js/store.js', 'js/tmdb.js', 'js/updates.js', 'js/sync.js', 'js/trakt.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
 
@@ -48,7 +48,7 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  if (url.hostname === 'api.themoviedb.org' || url.hostname === 'api.tvmaze.com') {
+  if (url.hostname === 'api.themoviedb.org') {
     e.respondWith((async () => {
       const c = await caches.open(API);
       try {
