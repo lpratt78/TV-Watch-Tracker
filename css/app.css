@@ -406,8 +406,9 @@ section[data-home-row] .section-h{margin-top:18px}
 .more-card .cover span{font:700 26px var(--display)}
 .more-card{text-decoration:none}
 
-/* Watching card: Up next sized posters, running off the edge when there are more */
-.stack .spread{display:grid;grid-template-columns:repeat(calc(var(--n) - 1),minmax(0,128px)) 118px;gap:0}
+/* Watching card: Up next sized posters scrolling across the card */
+.stack .spread.auto-scroll{display:block;margin:0;padding:0 0 4px;overflow-x:auto}
+.stack .spread .track{display:flex;gap:10px;width:max-content}
 .stack .spread .cover{width:118px;flex:none;position:relative;box-shadow:2px 2px 8px rgba(0,0,0,.35)}
 
 /* Live TV guide */
