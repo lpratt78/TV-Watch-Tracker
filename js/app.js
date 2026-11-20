@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.8.13';
+const APP_VERSION = '0.8.14';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -403,7 +403,7 @@ const recent = (d) => { const n = daysUntil(d); return n !== null && n <= 0 && n
 // newest first. Titles already in your library are left out (Coming up covers those). Kept for 30 minutes.
 let newRelCache = null;
 async function newReleases() {
-  if (newRelCache && Date.now() - newRelCache.t < 30 * 60e3) return notInLibrary(newRelCache.list);
+  if (newRelCache && Date.now() - newRelCache.t < 30 * 60e3) return noAnim(notInLibrary(newRelCache.list));
   const region = store.getSettings().region;
   const pages = [1, 2, 3];
   const [movies, shows] = await Promise.all([
@@ -419,7 +419,7 @@ async function newReleases() {
   const list = [...byKey.values()].sort((a, b) => b.date.localeCompare(a.date));
   list.forEach(remember);
   newRelCache = { t: Date.now(), list };
-  return notInLibrary(list);
+  return noAnim(notInLibrary(list));
 }
 // A poster card like the other rows, with how long ago it came out on the cover.
 function releaseCard(e) {
@@ -504,6 +504,10 @@ function genreTxt(t) {
   }
   return names.join(' · ');
 }
+// Animation is left out of Overview and Discover unless you picked it under Me or chose it as the genre.
+const ANIMATION = 16; // same id for movies and shows on TMDB
+const animOk = (genre) => genre?.name === 'Animation' || (store.getSettings().genres || []).includes('Animation');
+const noAnim = (items, genre = null) => (animOk(genre) ? items : items.filter((t) => !(genreIdsOf(t) || []).includes(ANIMATION)));
 const genreLine = (t) => { const g = genreTxt(t); return g ? `<span class="gen">${esc(g)}</span>` : ''; };
 
 // Slowly scroll a row sideways on its own, looping. Pauses while you touch it.
@@ -824,7 +828,7 @@ async function topList(n, type = 'all', genre = null, provider = '') {
       const d = await T.tmdb(`/discover/${t}`, {
         sort_by: 'vote_average.desc', 'vote_count.gte': minVotes, with_genres: genre ? (genre[t] || []).join('|') : '',
         // Talk, news and soap shows rank oddly on votes alone.
-        without_genres: t === 'tv' ? '10767,10763,10766' : '',
+        without_genres: [t === 'tv' ? '10767,10763,10766' : '', animOk(genre) ? '' : ANIMATION].filter(Boolean).join(','),
         ...(provider ? { with_watch_providers: provider, watch_region: region, with_watch_monetization_types: 'flatrate|free|ads' } : {}),
         page,
       });
@@ -896,6 +900,10 @@ async function serviceRows0(prov, genre) {
 
 // Load one page of a row, optionally in one genre. Returns { items, more }.
 async function loadRow(key, page = 1, type = 'all', genre = null, filters = {}) {
+  const r = await loadRowRaw(key, page, type, genre, filters);
+  return { ...r, items: noAnim(r.items, genre) };
+}
+async function loadRowRaw(key, page = 1, type = 'all', genre = null, filters = {}) {
   const spec = rowSpec(key, T.cachedProviders());
   if (!spec) throw new Error('That list is not available.');
   const gIds = (t) => (genre ? (genre[t] || []).join('|') : '');
