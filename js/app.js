@@ -6,7 +6,7 @@ import { checkUpdates, unseenCount, daysUntil } from './updates.js';
 import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 
-const APP_VERSION = '0.9.7';
+const APP_VERSION = '0.9.8';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -1078,7 +1078,7 @@ async function renderTitle(r) {
   const seasonSeen = (n) => (it?.status === 'watched' && !eps.length ? (info?.seasons[n]?.aired || 0) : eps.filter((c) => c.startsWith(`${n}x`)).length);
 
   const body = `
-    ${d.backdrop_path ? `<div class="backdrop"><img src="${esc(T.img(d.backdrop_path, 'w780'))}" alt=""></div>` : ''}
+    ${trailer ? heroTrailer(trailer.key, d.backdrop_path) : d.backdrop_path ? `<div class="backdrop"><img src="${esc(T.img(d.backdrop_path, 'w780'))}" alt=""></div>` : ''}
     <div class="hero">${cover(t)}<div style="min-width:0">
       <h3>${esc(t.title)}</h3>
       <div class="author">${esc([type === 'tv' ? 'TV' : 'Movie', t.year, runtime].filter(Boolean).join(' · '))}</div>
@@ -1457,6 +1457,14 @@ function pickTrailer(videos = []) {
   const lang = (store.getSettings().language || 'en-US').slice(0, 2);
   const score = (v) => (v.type === 'Trailer' ? 4 : v.type === 'Teaser' ? 2 : 0) + (v.official ? 2 : 0) + (v.iso_639_1 === lang ? 1 : 0);
   return yt.filter((v) => ['Trailer', 'Teaser'].includes(v.type)).sort((a, b) => score(b) - score(a) || String(b.published_at).localeCompare(String(a.published_at)))[0] || null;
+}
+// The trailer plays muted at the top of a title page, where the backdrop picture was.
+// Phones only allow muted autoplay; tap the player for sound. Reduce motion turns autoplay off.
+function heroTrailer(key, backdrop) {
+  const k = encodeURIComponent(key);
+  const auto = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1;
+  return `<div class="backdrop hero-trailer">${backdrop ? `<img src="${esc(T.img(backdrop, 'w780'))}" alt="">` : ''}
+    <iframe src="https://www.youtube.com/embed/${k}?autoplay=${auto}&mute=1&playsinline=1&loop=1&playlist=${k}&rel=0&modestbranding=1" title="Trailer" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div>`;
 }
 function closeTrailer() { $id('trailer')?.remove(); document.removeEventListener('keydown', trailerKey); }
 const trailerKey = (e) => { if (e.key === 'Escape') closeTrailer(); };

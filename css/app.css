@@ -151,6 +151,9 @@ button.star{font-size:26px;cursor:pointer;padding:0 2px}
 .hero h3{font-size:21px;line-height:1.15;margin-bottom:4px}
 .backdrop{margin:-14px -16px 14px;aspect-ratio:16/7;background:var(--grey-soft);overflow:hidden;position:relative}
 .backdrop img{width:100%;height:100%;object-fit:cover;display:block}
+.backdrop.hero-trailer{aspect-ratio:16/9;background:#000}
+.backdrop.hero-trailer img{position:absolute;inset:0}
+.backdrop.hero-trailer iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
 .label{font:600 11px var(--body);letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin:16px 0 6px}
 .status-pick{display:flex;flex-wrap:wrap;gap:6px}
 .status-pick button{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;padding:7px 12px;font:500 13px var(--body);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
