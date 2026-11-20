@@ -7,7 +7,7 @@ import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 import * as L from './livetv.js';
 
-const APP_VERSION = '0.9.1';
+const APP_VERSION = '0.9.2';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -1766,7 +1766,8 @@ function liveServicesCard(s) {
   return `<div class="card"><h3>Live TV services</h3>
     <p class="author" style="margin:0 0 4px">Tap the live TV services you have. The Live TV guide shows what's on their channels, plus your local channels.</p>
     <span class="author live-count">${svcCount(sel.size)}</span>
-    <div class="chips" style="margin-top:8px">${L.LIVE_SERVICES.map((v) => `<button class="chip" data-a="live-svc" data-v="${v.id}" aria-pressed="${sel.has(v.id)}">${esc(v.name)}</button>`).join('')}</div>
+    ${[['Paid services', L.LIVE_SERVICES.filter((v) => !v.free)], ['Free live TV apps', L.LIVE_SERVICES.filter((v) => v.free)]].map(([h, list]) => `<div class="label" style="margin:10px 0 6px">${h}</div>
+    <div class="chips">${list.map((v) => `<button class="chip" data-a="live-svc" data-v="${v.id}" aria-pressed="${sel.has(v.id)}">${esc(v.name)}</button>`).join('')}</div>`).join('')}
     <a class="link-row" href="#/livetv" style="padding-bottom:0">Open Live TV guide <span>›</span></a></div>`;
 }
 
@@ -1791,6 +1792,12 @@ async function renderLiveTV() {
   const note = `<p class="muted-note live-note">Times are in your time zone. Network shows only: local news, syndicated shows, movies and many live games aren't listed, and lineups vary by area and plan. Tap a show to open it.</p>`;
   const src = `<div class="srcnote">Schedule from <a href="https://www.tvmaze.com" target="_blank" rel="noopener">TVmaze</a> · channel lineups are approximate</div>`;
 
+  // Free live TV apps have their own channels that no public guide lists, so link to their guides.
+  const free = picked.filter((o) => o.free);
+  const freeBox = free.length ? `<div class="card live-free"><h3>${liveChip === 'all' ? 'Free live TV apps' : esc(free[0].name)}</h3>
+    <p class="author" style="margin:0 0 4px">${liveChip === 'all' ? 'These apps' : 'This app'} run${liveChip === 'all' ? '' : 's'} ${liveChip === 'all' ? 'their' : 'its'} own channels, and no public guide lists them. Open the app's guide to see what's on.</p>
+    ${free.map((o) => `<a class="link-row" href="${esc(o.url)}" target="_blank" rel="noopener">${esc(o.name)} guide <span>↗</span></a>`).join('')}</div>` : '';
+  if (liveChip !== 'all' && free.length) return { top, body: chips + freeBox };
   let entries;
   try { entries = await L.loadSchedule(); } catch (e) { return { top, body: chips + pick + errorBox(e) }; }
   const guide = L.buildGuide(entries, feed);
@@ -1826,7 +1833,7 @@ async function renderLiveTV() {
       return `${head}<div class="live-later"><span class="live-chn">${esc(c.name)}</span><span class="live-info">${liveTitle(a)}${epTxt(a) ? `<span class="author">${esc(epTxt(a))}</span>` : ''}</span></div>`;
     }).join('') : '<div class="empty-note">Nothing else listed on these channels in the next 12 hours.</div>';
   }
-  return { top, body: chips + ctrls + pick + list + note + src };
+  return { top, body: chips + ctrls + pick + list + freeBox + note + src };
 }
 // Keep "On now" current while the guide is open.
 setInterval(() => { if (current.name === 'livetv' && document.visibilityState === 'visible') redraw(); }, 60e3);
