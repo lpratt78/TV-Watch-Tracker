@@ -7,7 +7,7 @@ import * as sync from './sync.js';
 import { readZip, parseTrakt, summarize } from './trakt.js';
 import * as L from './livetv.js';
 
-const APP_VERSION = '0.9.0';
+const APP_VERSION = '0.9.1';
 const $id = (id) => document.getElementById(id);
 const topEl = $id('top');
 const bodyEl = $id('body');
@@ -192,6 +192,7 @@ const ICONS = {
   library: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="5.5" width="17" height="12" rx="2"/><path d="M8 20.5h8M10.5 9.5v5l4-2.5z"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>',
   lists: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M8 9h8M8 12.5h8M8 16h5"/></svg>',
+  live: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="7" width="18" height="12.5" rx="2.5"/><path d="M8.5 3l3.5 4 3.5-4"/><circle cx="17.5" cy="11" r="1" fill="currentColor" stroke="none"/></svg>',
   services: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="2.5"/><path d="M8 3.5l4 2.5 4-2.5M10.5 10v4l3.5-2z"/></svg>',
   alerts: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 16V11a6 6 0 0112 0v5l1.5 2h-15zM10 20.5a2 2 0 004 0"/></svg>',
   more: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0114 0"/></svg>',
@@ -200,13 +201,14 @@ const TABS = [
   { id: 'home', label: 'Overview', icon: ICONS.home },
   { id: 'lists', label: 'Lists', icon: ICONS.lists },
   { id: 'services', label: 'Services', icon: ICONS.services },
+  { id: 'livetv', label: 'Live TV', icon: ICONS.live },
   { id: 'discover', label: 'Discover', icon: ICONS.search },
   { id: 'alerts', label: 'Alerts', icon: ICONS.alerts },
   { id: 'me', label: 'Me', icon: ICONS.more },
 ];
 const SCREENS = { home: renderHome, library: renderLibrary, discover: renderDiscover, alerts: renderAlerts, me: renderMe, about: renderAbout, title: renderTitle, season: renderSeason, browse: renderBrowse, mylists: renderMyLists, lists: renderLists, list: renderLibrary, services: renderServices, service: renderLibrary, pickservices: renderPickServices, top: renderTop, livetv: renderLiveTV };
 const ALIASES = { updates: 'alerts', settings: 'me', search: 'discover', calendar: 'alerts' };
-const TAB_OF = { about: 'me', title: null, season: null, browse: 'discover', mylists: 'lists', list: 'lists', library: 'lists', service: 'services', pickservices: 'me', top: 'discover', livetv: null };
+const TAB_OF = { about: 'me', title: null, season: null, browse: 'discover', mylists: 'lists', list: 'lists', library: 'lists', service: 'services', pickservices: 'me', top: 'discover' };
 let current = { name: 'home', args: [], query: new URLSearchParams() };
 let activeTab = 'home';
 
@@ -1769,7 +1771,7 @@ function liveServicesCard(s) {
 }
 
 async function renderLiveTV() {
-  const top = '<button class="icon-btn" data-a="back">‹ Back</button><h2>Live TV guide</h2><button class="icon-btn" data-a="live-refresh">↻</button>';
+  const top = '<h2>Live TV guide</h2><button class="icon-btn" data-a="live-refresh">↻</button>';
   const mine = myLive();
   const opts = [...mine, L.LOCAL];
   if (liveChip !== 'all' && !opts.some((o) => o.id === liveChip)) liveChip = 'all';
